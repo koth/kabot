@@ -1,0 +1,36 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "/Users/kothchen/.kabot/workspace",
+      "model": "anthropic/claude-opus-4-5",
+      "maxTokens": 8192,
+      "temperature": 0.7,
+      "maxToolIterations": 20
+    }
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "YOUR_OPENROUTER_KEY",
+      "apiBase": "https://openrouter.ai/api/v1"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "8243851214:xxxx-xxx",
+      "allowFrom": ["kothchen"]
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "YOUR_BRAVE_API_KEY"
+      }
+    }
+  },
+  "heartbeat": {
+    "enabled": true,
+    "intervalS": 1800,
+    "cronStorePath": "/Users/kothchen/.kabot/cron/jobs.json"
+  }
+}
