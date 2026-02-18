@@ -6,14 +6,23 @@
 #include <vector>
 #include <utility>
 
+#include "sandbox/sandbox_executor.hpp"
+
 namespace kabot::agent {
 
-ContextBuilder::ContextBuilder(std::string workspace)
+ContextBuilder::ContextBuilder(std::string workspace, kabot::config::QmdConfig qmd)
     : workspace_(std::move(workspace))
     , memory_(workspace_)
-    , skills_(workspace_) {}
+    , skills_(workspace_)
+    , qmd_(std::move(qmd)) {}
 
 std::string ContextBuilder::BuildSystemPrompt(const std::vector<std::string>& skill_names) const {
+    return BuildSystemPrompt(skill_names, "");
+}
+
+std::string ContextBuilder::BuildSystemPrompt(
+    const std::vector<std::string>& skill_names,
+    const std::string& current_message) const {
     std::ostringstream oss;
     oss << "# kabot\n\n";
     oss << "## Workspace\n";
@@ -24,7 +33,15 @@ std::string ContextBuilder::BuildSystemPrompt(const std::vector<std::string>& sk
         oss << bootstrap << "\n\n";
     }
 
-    const auto memory = memory_.GetMemoryContext();
+    std::string memory;
+    if (qmd_.enabled && !current_message.empty()) {
+        memory = BuildQmdContext(current_message);
+        if (memory.empty()) {
+            memory = memory_.GetMemoryContext();
+        }
+    } else {
+        memory = memory_.GetMemoryContext();
+    }
     if (!memory.empty()) {
         oss << "# Memory\n\n" << memory << "\n\n";
     }
@@ -55,7 +72,7 @@ std::vector<kabot::providers::Message> ContextBuilder::BuildMessages(
     std::vector<kabot::providers::Message> messages;
     kabot::providers::Message system_message{};
     system_message.role = "system";
-    system_message.content = BuildSystemPrompt({});
+    system_message.content = BuildSystemPrompt({}, current_message);
     messages.push_back(system_message);
 
     messages.insert(messages.end(), history.begin(), history.end());
@@ -113,6 +130,46 @@ std::string ContextBuilder::LoadBootstrapFiles() const {
         }
     }
     return has_content ? oss.str() : std::string();
+}
+
+std::string ContextBuilder::BuildQmdContext(const std::string& query) const {
+    if (!qmd_.enabled || query.empty()) {
+        return {};
+    }
+
+    std::string escaped;
+    escaped.reserve(query.size());
+    for (const char ch : query) {
+        if (ch == '"') {
+            escaped += "\\\"";
+        } else if (ch == '\n' || ch == '\r') {
+            escaped += ' ';
+        } else {
+            escaped += ch;
+        }
+    }
+
+    std::ostringstream cmd;
+    cmd << qmd_.command;
+    if (!qmd_.index.empty()) {
+        cmd << " --index " << qmd_.index;
+    }
+    cmd << " query --md";
+    cmd << " --min-score " << qmd_.min_score;
+    cmd << " -n " << qmd_.max_results;
+    if (!qmd_.collection.empty()) {
+        cmd << " -c " << qmd_.collection;
+    }
+    cmd << " \"" << escaped << "\"";
+
+    const auto result = kabot::sandbox::SandboxExecutor::Run(
+        cmd.str(),
+        workspace_,
+        std::chrono::seconds(qmd_.timeout_s));
+    if (result.timed_out || result.exit_code != 0) {
+        return {};
+    }
+    return result.output;
 }
 
 std::vector<kabot::providers::ContentPart> ContextBuilder::BuildUserContent(

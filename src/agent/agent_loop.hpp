@@ -4,6 +4,7 @@
 #include <string>
 
 #include "agent/context_builder.hpp"
+#include "agent/memory_store.hpp"
 #include "agent/tools/tool_registry.hpp"
 #include "bus/message_bus.hpp"
 #include "config/config_schema.hpp"
@@ -18,7 +19,8 @@ public:
         kabot::bus::MessageBus& bus,
         kabot::providers::LLMProvider& provider,
         std::string workspace,
-        kabot::config::AgentDefaults config);
+        kabot::config::AgentDefaults config,
+        kabot::config::QmdConfig qmd);
     void Run();
     void Stop();
     std::string ProcessDirect(const std::string& content, const std::string& session_key);
@@ -28,8 +30,10 @@ private:
     kabot::providers::LLMProvider& provider_;
     std::string workspace_;
     kabot::config::AgentDefaults config_;
+    kabot::config::QmdConfig qmd_;
     kabot::agent::ContextBuilder context_;
     kabot::session::SessionManager sessions_;
+    kabot::agent::MemoryStore memory_;
     kabot::agent::tools::ToolRegistry tools_;
     bool running_ = false;
     std::mutex process_mutex_;
@@ -37,6 +41,10 @@ private:
     kabot::bus::OutboundMessage ProcessMessage(const kabot::bus::InboundMessage& msg);
     kabot::bus::OutboundMessage ProcessSystemMessage(const kabot::bus::InboundMessage& msg);
     void RegisterDefaultTools();
+    void AppendMemoryEntry(const std::string& session_key,
+                           const std::string& user_content,
+                           const std::string& assistant_content);
+    void UpdateQmdIndex() const;
 };
 
 }  // namespace kabot::agent

@@ -142,6 +142,37 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         }
     }
 
+    if (data.contains("qmd") && data["qmd"].is_object()) {
+        const auto& qmd = data["qmd"];
+        if (qmd.contains("enabled") && qmd["enabled"].is_boolean()) {
+            config.qmd.enabled = qmd["enabled"].get<bool>();
+        }
+        if (qmd.contains("command") && qmd["command"].is_string()) {
+            config.qmd.command = qmd["command"].get<std::string>();
+        }
+        if (qmd.contains("collection") && qmd["collection"].is_string()) {
+            config.qmd.collection = qmd["collection"].get<std::string>();
+        }
+        if (qmd.contains("index") && qmd["index"].is_string()) {
+            config.qmd.index = qmd["index"].get<std::string>();
+        }
+        if (qmd.contains("maxResults") && qmd["maxResults"].is_number_integer()) {
+            config.qmd.max_results = qmd["maxResults"].get<int>();
+        }
+        if (qmd.contains("minScore") && qmd["minScore"].is_number()) {
+            config.qmd.min_score = qmd["minScore"].get<double>();
+        }
+        if (qmd.contains("timeoutS") && qmd["timeoutS"].is_number_integer()) {
+            config.qmd.timeout_s = qmd["timeoutS"].get<int>();
+        }
+        if (qmd.contains("updateOnWrite") && qmd["updateOnWrite"].is_boolean()) {
+            config.qmd.update_on_write = qmd["updateOnWrite"].get<bool>();
+        }
+        if (qmd.contains("updateEmbeddings") && qmd["updateEmbeddings"].is_boolean()) {
+            config.qmd.update_embeddings = qmd["updateEmbeddings"].get<bool>();
+        }
+    }
+
     if (data.contains("tools") && data["tools"].is_object()) {
         const auto& tools = data["tools"];
         if (tools.contains("web") && tools["web"].is_object()) {
@@ -351,6 +382,69 @@ Config LoadConfig() {
         "KABOT_AGENT_TEMPERATURE");
     if (!temperature.empty()) {
         config.agents.defaults.temperature = ParseDouble(temperature, config.agents.defaults.temperature);
+    }
+
+    const auto qmd_enabled = GetEnvFallback(
+        "KABOT_QMD__ENABLED",
+        "KABOT_QMD_ENABLED");
+    if (!qmd_enabled.empty()) {
+        config.qmd.enabled = ParseBool(qmd_enabled);
+    }
+
+    const auto qmd_command = GetEnvFallback(
+        "KABOT_QMD__COMMAND",
+        "KABOT_QMD_COMMAND");
+    if (!qmd_command.empty()) {
+        config.qmd.command = qmd_command;
+    }
+
+    const auto qmd_collection = GetEnvFallback(
+        "KABOT_QMD__COLLECTION",
+        "KABOT_QMD_COLLECTION");
+    if (!qmd_collection.empty()) {
+        config.qmd.collection = qmd_collection;
+    }
+
+    const auto qmd_index = GetEnvFallback(
+        "KABOT_QMD__INDEX",
+        "KABOT_QMD_INDEX");
+    if (!qmd_index.empty()) {
+        config.qmd.index = qmd_index;
+    }
+
+    const auto qmd_max_results = GetEnvFallback(
+        "KABOT_QMD__MAX_RESULTS",
+        "KABOT_QMD_MAX_RESULTS");
+    if (!qmd_max_results.empty()) {
+        config.qmd.max_results = ParseInt(qmd_max_results, config.qmd.max_results);
+    }
+
+    const auto qmd_min_score = GetEnvFallback(
+        "KABOT_QMD__MIN_SCORE",
+        "KABOT_QMD_MIN_SCORE");
+    if (!qmd_min_score.empty()) {
+        config.qmd.min_score = ParseDouble(qmd_min_score, config.qmd.min_score);
+    }
+
+    const auto qmd_timeout = GetEnvFallback(
+        "KABOT_QMD__TIMEOUT_S",
+        "KABOT_QMD_TIMEOUT_S");
+    if (!qmd_timeout.empty()) {
+        config.qmd.timeout_s = ParseInt(qmd_timeout, config.qmd.timeout_s);
+    }
+
+    const auto qmd_update_on_write = GetEnvFallback(
+        "KABOT_QMD__UPDATE_ON_WRITE",
+        "KABOT_QMD_UPDATE_ON_WRITE");
+    if (!qmd_update_on_write.empty()) {
+        config.qmd.update_on_write = ParseBool(qmd_update_on_write);
+    }
+
+    const auto qmd_update_embeddings = GetEnvFallback(
+        "KABOT_QMD__UPDATE_EMBEDDINGS",
+        "KABOT_QMD_UPDATE_EMBEDDINGS");
+    if (!qmd_update_embeddings.empty()) {
+        config.qmd.update_embeddings = ParseBool(qmd_update_embeddings);
     }
 
     const auto max_tool_iterations = GetEnvFallback(

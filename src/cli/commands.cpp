@@ -34,7 +34,8 @@ int RunGateway() {
         bus,
         *provider,
         config.agents.defaults.workspace,
-        config.agents.defaults);
+        config.agents.defaults,
+        config.qmd);
 
     kabot::heartbeat::HeartbeatService heartbeat(
         config.agents.defaults.workspace,

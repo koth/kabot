@@ -51,11 +51,24 @@ struct HeartbeatConfig {
     std::string cron_store_path;
 };
 
+struct QmdConfig {
+    bool enabled = false;
+    std::string command = "qmd";
+    std::string collection;
+    std::string index;
+    int max_results = 5;
+    double min_score = 0.3;
+    int timeout_s = 10;
+    bool update_on_write = false;
+    bool update_embeddings = false;
+};
+
 struct Config {
     AgentsConfig agents;
     ChannelsConfig channels;
     HeartbeatConfig heartbeat;
     ProvidersConfig providers;
+    QmdConfig qmd;
 };
 
 }  // namespace kabot::config

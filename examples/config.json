@@ -28,6 +28,17 @@
       }
     }
   },
+  "qmd": {
+    "enabled": false,
+    "command": "qmd",
+    "collection": "kabot-memory",
+    "index": "",
+    "maxResults": 5,
+    "minScore": 0.3,
+    "timeoutS": 10,
+    "updateOnWrite": false,
+    "updateEmbeddings": false
+  },
   "heartbeat": {
     "enabled": true,
     "intervalS": 1800,

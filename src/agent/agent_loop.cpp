@@ -11,6 +11,7 @@
 #include "agent/tools/shell.hpp"
 #include "agent/tools/spawn.hpp"
 #include "agent/tools/web.hpp"
+#include "sandbox/sandbox_executor.hpp"
 
 namespace kabot::agent {
 
@@ -18,13 +19,16 @@ AgentLoop::AgentLoop(
     kabot::bus::MessageBus& bus,
     kabot::providers::LLMProvider& provider,
     std::string workspace,
-    kabot::config::AgentDefaults config)
+    kabot::config::AgentDefaults config,
+    kabot::config::QmdConfig qmd)
     : bus_(bus)
     , provider_(provider)
     , workspace_(std::move(workspace))
     , config_(std::move(config))
-    , context_(workspace_)
-    , sessions_(workspace_) {
+    , qmd_(std::move(qmd))
+    , context_(workspace_, qmd_)
+    , sessions_(workspace_)
+    , memory_(workspace_) {
     RegisterDefaultTools();
 }
 
@@ -97,6 +101,7 @@ std::string AgentLoop::ProcessDirect(const std::string& content, const std::stri
     session.AddMessage("user", content);
     session.AddMessage("assistant", final_content);
     sessions_.Save(session);
+    AppendMemoryEntry(session_key, content, final_content);
     return final_content;
 }
 
@@ -182,6 +187,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
     session.AddMessage("user", content);
     session.AddMessage("assistant", final_content);
     sessions_.Save(session);
+    AppendMemoryEntry(msg.SessionKey(), content, final_content);
 
     kabot::bus::OutboundMessage outbound{};
     outbound.channel = msg.channel;
@@ -211,6 +217,39 @@ void AgentLoop::RegisterDefaultTools() {
             bus_.PublishOutbound(msg);
         }));
     tools_.Register(std::make_unique<kabot::agent::tools::SpawnTool>());
+}
+
+void AgentLoop::AppendMemoryEntry(const std::string& session_key,
+                                  const std::string& user_content,
+                                  const std::string& assistant_content) {
+    std::ostringstream entry;
+    entry << "- [" << session_key << "] user: " << user_content << "\n";
+    entry << "  assistant: " << assistant_content << "\n";
+    memory_.AppendToday(entry.str());
+    UpdateQmdIndex();
+}
+
+void AgentLoop::UpdateQmdIndex() const {
+    if (!qmd_.enabled || !qmd_.update_on_write) {
+        return;
+    }
+    std::ostringstream cmd;
+    cmd << qmd_.command;
+    if (!qmd_.index.empty()) {
+        cmd << " --index " << qmd_.index;
+    }
+    cmd << " update";
+    if (qmd_.update_embeddings) {
+        cmd << " && " << qmd_.command;
+        if (!qmd_.index.empty()) {
+            cmd << " --index " << qmd_.index;
+        }
+        cmd << " embed";
+    }
+    kabot::sandbox::SandboxExecutor::Run(
+        cmd.str(),
+        workspace_,
+        std::chrono::seconds(qmd_.timeout_s));
 }
 
 kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::InboundMessage& msg) {
@@ -267,6 +306,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
     session.AddMessage("user", "[System] " + msg.content);
     session.AddMessage("assistant", final_content);
     sessions_.Save(session);
+    AppendMemoryEntry(session_key, msg.content, final_content);
 
     kabot::bus::OutboundMessage outbound{};
     outbound.channel = origin_channel;
