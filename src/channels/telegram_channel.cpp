@@ -396,14 +396,14 @@ std::string TelegramChannel::ConvertMarkdownToHtml(const std::string& text) cons
     };
 
     result = replace_and_store(result,
-                               std::regex(R"(```[\w]*\n?([\s\S]*?)```)", std::regex::multiline),
+                               std::regex(R"(```[\w]*\n?([\s\S]*?)```)") ,
                                code_blocks,
                                "CB");
     result = replace_and_store(result, std::regex(R"(`([^`]+)`)") , inline_codes, "IC");
     result = replace_tables(result, tables);
 
-    result = std::regex_replace(result, std::regex(R"(^#{1,6}\s+(.+)$)", std::regex::multiline), "$1");
-    result = std::regex_replace(result, std::regex(R"(^>\s*(.*)$)", std::regex::multiline), "$1");
+    result = std::regex_replace(result, std::regex(R"((^|\n)#{1,6}\s+([^\n]+))"), "$1$2");
+    result = std::regex_replace(result, std::regex(R"((^|\n)>\s*([^\n]*))"), "$1$2");
 
     result = std::regex_replace(result, std::regex("&"), "&amp;");
     result = std::regex_replace(result, std::regex("<"), "&lt;");
@@ -414,7 +414,7 @@ std::string TelegramChannel::ConvertMarkdownToHtml(const std::string& text) cons
     result = std::regex_replace(result, std::regex(R"(__(.+?)__)"), "<b>$1</b>");
     result = std::regex_replace(result, std::regex(R"((^|[^a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9]))"), "$1<i>$2</i>");
     result = std::regex_replace(result, std::regex(R"(~~(.+?)~~)"), "<s>$1</s>");
-    result = std::regex_replace(result, std::regex(R"(^[-*]\s+)", std::regex::multiline), "• ");
+    result = std::regex_replace(result, std::regex(R"((^|\n)[-*]\s+)"), "$1• ");
 
     for (std::size_t i = 0; i < inline_codes.size(); ++i) {
         auto escaped = inline_codes[i];
