@@ -69,6 +69,7 @@ std::string AgentLoop::ProcessDirect(const std::string& content, const std::stri
 
     int iteration = 0;
     std::string final_content;
+    bool message_sent = false;
     const auto model = config_.model.empty() ? provider_.GetDefaultModel() : config_.model;
 
     while (iteration < config_.max_iterations) {
@@ -84,6 +85,9 @@ std::string AgentLoop::ProcessDirect(const std::string& content, const std::stri
             messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls);
             session.AddMessage("assistant", response.content, response.tool_calls);
             for (const auto& call : response.tool_calls) {
+                if (call.name == "message") {
+                    message_sent = true;
+                }
                 std::string result = tools_.Execute(call.name, call.arguments);
                 messages = context_.AddToolResult(messages, call.id, call.name, result);
                 session.AddToolMessage(call.id, call.name, result);
@@ -155,6 +159,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
 
     int iteration = 0;
     std::string final_content;
+    bool message_sent = false;
     const auto model = config_.model.empty() ? provider_.GetDefaultModel() : config_.model;
 
     while (iteration < config_.max_iterations) {
@@ -170,6 +175,9 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
             messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls);
             session.AddMessage("assistant", response.content, response.tool_calls);
             for (const auto& call : response.tool_calls) {
+                if (call.name == "message") {
+                    message_sent = true;
+                }
                 std::string result = tools_.Execute(call.name, call.arguments);
                 messages = context_.AddToolResult(messages, call.id, call.name, result);
                 session.AddToolMessage(call.id, call.name, result);
@@ -190,9 +198,11 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
     AppendMemoryEntry(msg.SessionKey(), content, final_content);
 
     kabot::bus::OutboundMessage outbound{};
-    outbound.channel = msg.channel;
-    outbound.chat_id = msg.chat_id;
-    outbound.content = final_content;
+    if (!message_sent) {
+        outbound.channel = msg.channel;
+        outbound.chat_id = msg.chat_id;
+        outbound.content = final_content;
+    }
     return outbound;
 }
 
@@ -274,6 +284,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
 
     int iteration = 0;
     std::string final_content;
+    bool message_sent = false;
     const auto model = config_.model.empty() ? provider_.GetDefaultModel() : config_.model;
 
     while (iteration < config_.max_iterations) {
@@ -289,6 +300,9 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
             messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls);
             session.AddMessage("assistant", response.content, response.tool_calls);
             for (const auto& call : response.tool_calls) {
+                if (call.name == "message") {
+                    message_sent = true;
+                }
                 std::string result = tools_.Execute(call.name, call.arguments);
                 messages = context_.AddToolResult(messages, call.id, call.name, result);
                 session.AddToolMessage(call.id, call.name, result);
@@ -309,9 +323,11 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
     AppendMemoryEntry(session_key, msg.content, final_content);
 
     kabot::bus::OutboundMessage outbound{};
-    outbound.channel = origin_channel;
-    outbound.chat_id = origin_chat_id;
-    outbound.content = final_content;
+    if (!message_sent) {
+        outbound.channel = origin_channel;
+        outbound.chat_id = origin_chat_id;
+        outbound.content = final_content;
+    }
     return outbound;
 }
 
