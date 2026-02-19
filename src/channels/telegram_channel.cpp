@@ -97,11 +97,20 @@ void TelegramChannel::Start() {
             return;
         }
 
+        const auto message_id = static_cast<long long>(message->messageId);
+        const std::string chat_id = std::to_string(message->chat->id);
+        if (message_id > 0) {
+            const auto it_last = last_message_ids_.find(chat_id);
+            if (it_last != last_message_ids_.end() && message_id <= it_last->second) {
+                return;
+            }
+            last_message_ids_[chat_id] = message_id;
+        }
+
         std::string sender_id = std::to_string(message->from->id);
         if (!message->from->username.empty()) {
             sender_id += "|" + message->from->username;
         }
-        const std::string chat_id = std::to_string(message->chat->id);
         std::cerr << "[telegram] received message from " << sender_id
                   << " in chat " << chat_id << std::endl;
         std::string media_type;
@@ -150,8 +159,8 @@ void TelegramChannel::Start() {
             }
         }
 
-        if (message->messageId > 0) {
-            message_chat_ids_[std::to_string(message->messageId)] = chat_id;
+        if (message_id > 0) {
+            message_chat_ids_[std::to_string(message_id)] = chat_id;
         }
 
         HandleIncomingMessage(sender_id, chat_id, text, caption, media_type, mime_type, media_id, metadata);

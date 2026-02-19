@@ -36,6 +36,7 @@ private:
     kabot::config::TelegramConfig config_;
     std::unordered_map<std::string, std::string> chat_ids_;
     std::unordered_map<std::string, std::string> message_chat_ids_;
+    std::unordered_map<std::string, long long> last_message_ids_;
     std::unique_ptr<TgBot::HttpClient> http_client_;
     std::unique_ptr<TgBot::Bot> bot_;
     std::unique_ptr<TgBot::TgLongPoll> long_poll_;
