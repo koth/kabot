@@ -32,12 +32,9 @@
     "enabled": false,
     "command": "qmd",
     "collection": "kabot-memory",
-    "index": "",
     "maxResults": 5,
-    "minScore": 0.3,
-    "timeoutS": 10,
-    "updateOnWrite": false,
-    "updateEmbeddings": false
+    "updateOnWrite": true,
+    "updateEmbeddings": true
   },
   "heartbeat": {
     "enabled": true,

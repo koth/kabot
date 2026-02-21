@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <vector>
 #include <utility>
@@ -34,12 +35,17 @@ std::string ContextBuilder::BuildSystemPrompt(
     }
 
     std::string memory;
-    if (qmd_.enabled && !current_message.empty()) {
-        memory = BuildQmdContext(current_message);
-        if (memory.empty()) {
-            memory = memory_.GetMemoryContext();
+    if (qmd_.enabled) {
+        std::cerr << "[context] memory=QMD" << std::endl;
+        if (!current_message.empty()) {
+            std::cerr << "[context] qmd_query=" << current_message << std::endl;
+            memory = BuildQmdContext(current_message);
+            if (!memory.empty()) {
+                std::cerr << "[context] qmd_memory\n" << memory << std::endl;
+            }
         }
     } else {
+        std::cerr << "[context] memory=FULL" << std::endl;
         memory = memory_.GetMemoryContext();
     }
     if (!memory.empty()) {
