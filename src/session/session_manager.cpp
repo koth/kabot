@@ -102,6 +102,9 @@ std::vector<kabot::providers::Message> Session::GetHistory(std::size_t max_messa
         msg.name = entry.name;
         msg.tool_call_id = entry.tool_call_id;
         msg.tool_calls = entry.tool_calls;
+        if (!allow_tool && !msg.tool_calls.empty()) {
+            msg.tool_calls.clear();
+        }
         history.push_back(msg);
     }
     return history;
