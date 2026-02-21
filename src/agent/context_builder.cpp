@@ -172,7 +172,14 @@ std::string ContextBuilder::BuildQmdContext(const std::string& query) const {
         cmd.str(),
         workspace_,
         std::chrono::seconds(qmd_.timeout_s));
+    std::cerr << "[context] qmd_cmd=" << cmd.str() << std::endl;
     if (result.timed_out || result.exit_code != 0) {
+        std::cerr << "[context] qmd_failed exit=" << result.exit_code
+                  << " timeout=" << (result.timed_out ? "true" : "false")
+                  << std::endl;
+        if (!result.error.empty()) {
+            std::cerr << "[context] qmd_error\n" << result.error << std::endl;
+        }
         return {};
     }
     return result.output;
