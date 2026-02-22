@@ -175,6 +175,12 @@ endif()
 add_executable(kabot_cli ${KABOT_SOURCES})
 target_link_libraries(kabot_cli PRIVATE kabot_core)
 
+add_library(kabot_tts STATIC agent/tools/tts.cpp)
+target_link_libraries(kabot_tts PRIVATE kabot_core)
+
+add_executable(tts_test tts_test.cpp)
+target_link_libraries(tts_test PRIVATE kabot_core kabot_tts)
+
 if(APPLE)
   target_link_options(kabot_cli PRIVATE "-Wl,-no_warn_duplicate_libraries")
 endif()

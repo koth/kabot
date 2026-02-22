@@ -23,6 +23,7 @@
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
 
+#include <openssl/err.h>
 #include <openssl/sha.h>
 
 #include "nlohmann/json.hpp"
@@ -176,16 +177,29 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
         + "&Sec-MS-GEC=" + sec_ms_gec
         + "&Sec-MS-GEC-Version=1-" + kChromiumFullVersion;
 
+    std::string stage = "init";
     try {
         boost::asio::io_context ioc;
-        boost::asio::ssl::context ctx(boost::asio::ssl::context::tlsv12_client);
+        boost::asio::ssl::context ctx(boost::asio::ssl::context::tls_client);
         ctx.set_default_verify_paths();
+        ctx.set_options(boost::asio::ssl::context::default_workarounds);
+        ctx.set_verify_mode(boost::asio::ssl::verify_peer);
         boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>> ws(ioc, ctx);
         boost::asio::ip::tcp::resolver resolver(ioc);
-        auto results = resolver.resolve(host, "443");
+        stage = "resolve";
+        auto results = resolver.resolve(boost::asio::ip::tcp::v4(), host, "443");
+        stage = "connect";
         boost::beast::get_lowest_layer(ws).connect(results);
+        stage = "sni";
+        if (!SSL_set_tlsext_host_name(ws.next_layer().native_handle(), host.c_str())) {
+            const auto err = static_cast<int>(::ERR_get_error());
+            boost::system::error_code ec(err, boost::asio::error::get_ssl_category());
+            throw boost::system::system_error(ec);
+        }
+        stage = "tls_handshake";
         ws.next_layer().handshake(boost::asio::ssl::stream_base::client);
 
+        stage = "ws_setup";
         ws.set_option(boost::beast::websocket::stream_base::decorator(
             [&](boost::beast::websocket::request_type& req) {
                 req.set(boost::beast::http::field::host, host);
@@ -198,6 +212,7 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
                 req.set(boost::beast::http::field::accept_language, "en-US,en;q=0.9");
             }));
 
+        stage = "ws_handshake";
         ws.handshake(host, target);
 
         std::ostringstream config_msg;
@@ -205,6 +220,7 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
         config_msg << "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\"true\"},\"outputFormat\":\"";
         config_msg << output_format;
         config_msg << "\"}}}}";
+        stage = "send_config";
         ws.write(boost::asio::buffer(config_msg.str()));
 
         const auto request_id = RandomHex(16);
@@ -215,11 +231,13 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
              << "xmlns:mstts=\"https://www.w3.org/2001/mstts\" xml:lang=\"" << lang << "\">"
              << "<voice name=\"" << voice << "\"><prosody rate=\"" << rate << "\" pitch=\"" << pitch
              << "\" volume=\"" << volume << "\">" << EscapeXml(text) << "</prosody></voice></speak>";
+        stage = "send_ssml";
         ws.write(boost::asio::buffer(ssml.str()));
 
         std::vector<SubtitleLine> subtitles;
         bool finished = false;
         while (!finished) {
+            stage = "read";
             boost::beast::flat_buffer buffer;
             ws.read(buffer);
             if (ws.got_text()) {
@@ -266,7 +284,9 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
             }
         }
 
-        ws.close(boost::beast::websocket::close_code::normal);
+        stage = "close";
+        boost::system::error_code close_ec;
+        ws.close(boost::beast::websocket::close_code::normal, close_ec);
 
         std::string subtitle_path;
         if (save_subtitles) {
@@ -280,7 +300,7 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
         };
         return result.dump(2);
     } catch (const std::exception& ex) {
-        return std::string("Error: tts failed: ") + ex.what();
+        return std::string("Error: tts failed at ") + stage + ": " + ex.what();
     }
 }
 
