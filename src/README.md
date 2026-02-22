@@ -1,6 +1,5 @@
 # Kabot C++
 
-此目录为 kabot 的 C++ 迁移实现，目录结构与 `kabot/` 对齐。
 
 ## 结构
 
@@ -15,3 +14,35 @@
 - `session/` 会话与状态
 - `skills/` 技能与工具
 - `utils/` 通用工具
+
+## Cron 工具
+
+对话中可使用 `cron` 工具创建/管理定时任务。
+
+### 示例
+
+固定提醒：
+```
+cron(action="add", message="Time to take a break!", every_seconds=1200)
+```
+
+动态任务（由 agent 执行并返回结果）：
+```
+cron(action="add", message="Check HKUDS/nanobot GitHub stars and report", every_seconds=600)
+```
+
+一次性任务（到点执行后自动删除）：
+```
+cron(action="add", message="Remind me about the meeting", at="2026-02-22T22:05:00")
+```
+
+带时区的 Cron 表达式：
+```
+cron(action="add", message="Morning standup", cron_expr="0 9 * * 1-5", tz="America/Vancouver")
+```
+
+列表/删除：
+```
+cron(action="list")
+cron(action="remove", job_id="abc123")
+```

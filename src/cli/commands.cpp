@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -110,34 +111,57 @@ int RunGateway() {
     }
 
     kabot::bus::MessageBus bus;
+    std::function<std::string(const std::string&)> on_heartbeat;
+    std::function<std::string(const kabot::cron::CronJob&)> on_cron;
+    kabot::heartbeat::HeartbeatService heartbeat(
+        config.agents.defaults.workspace,
+        [&on_heartbeat](const std::string& prompt) {
+            if (on_heartbeat) {
+                return on_heartbeat(prompt);
+            }
+            return std::string("HEARTBEAT_OK");
+        },
+        [&on_cron, &bus](const kabot::cron::CronJob& job) {
+            if (on_cron) {
+                return on_cron(job);
+            }
+            if (job.payload.deliver && !job.payload.to.empty()) {
+                kabot::bus::OutboundMessage outbound{};
+                outbound.channel = job.payload.channel.empty() ? "telegram" : job.payload.channel;
+                outbound.chat_id = job.payload.to;
+                outbound.content = job.payload.message;
+                bus.PublishOutbound(outbound);
+            }
+            return job.payload.message;
+        },
+        std::chrono::seconds(config.heartbeat.interval_s),
+        config.heartbeat.enabled,
+        config.heartbeat.cron_store_path);
+
     kabot::agent::AgentLoop agent(
         bus,
         *provider,
         config.agents.defaults.workspace,
         config.agents.defaults,
-        config.qmd);
+        config.qmd,
+        &heartbeat.Cron());
 
-    kabot::heartbeat::HeartbeatService heartbeat(
-        config.agents.defaults.workspace,
-        [&agent](const std::string& prompt) {
-            return agent.ProcessDirect(prompt, "heartbeat");
-        },
-        [&agent, &bus](const kabot::cron::CronJob& job) {
-            const auto response = agent.ProcessDirect(
-                job.payload.message,
-                "cron:" + job.id);
-            if (job.payload.deliver && !job.payload.to.empty()) {
-                kabot::bus::OutboundMessage outbound{};
-                outbound.channel = job.payload.channel.empty() ? "telegram" : job.payload.channel;
-                outbound.chat_id = job.payload.to;
-                outbound.content = response;
-                bus.PublishOutbound(outbound);
-            }
-            return response;
-        },
-        std::chrono::seconds(config.heartbeat.interval_s),
-        config.heartbeat.enabled,
-        config.heartbeat.cron_store_path);
+    on_heartbeat = [&agent](const std::string& prompt) {
+        return agent.ProcessDirect(prompt, "heartbeat");
+    };
+    on_cron = [&agent, &bus](const kabot::cron::CronJob& job) {
+        const auto response = agent.ProcessDirect(
+            job.payload.message,
+            "cron:" + job.id);
+        if (job.payload.deliver && !job.payload.to.empty()) {
+            kabot::bus::OutboundMessage outbound{};
+            outbound.channel = job.payload.channel.empty() ? "telegram" : job.payload.channel;
+            outbound.chat_id = job.payload.to;
+            outbound.content = response;
+            bus.PublishOutbound(outbound);
+        }
+        return response;
+    };
 
     kabot::channels::ChannelManager channels(config, bus);
 

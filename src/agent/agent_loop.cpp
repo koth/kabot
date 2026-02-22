@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "agent/tools/cron.hpp"
 #include "agent/tools/filesystem.hpp"
 #include "agent/tools/message.hpp"
 #include "agent/tools/shell.hpp"
@@ -20,7 +21,8 @@ AgentLoop::AgentLoop(
     kabot::providers::LLMProvider& provider,
     std::string workspace,
     kabot::config::AgentDefaults config,
-    kabot::config::QmdConfig qmd)
+    kabot::config::QmdConfig qmd,
+    kabot::cron::CronService* cron)
     : bus_(bus)
     , provider_(provider)
     , workspace_(std::move(workspace))
@@ -28,7 +30,8 @@ AgentLoop::AgentLoop(
     , qmd_(std::move(qmd))
     , context_(workspace_, qmd_)
     , sessions_(workspace_)
-    , memory_(workspace_) {
+    , memory_(workspace_)
+    , cron_(cron) {
     RegisterDefaultTools();
 }
 
@@ -227,6 +230,9 @@ void AgentLoop::RegisterDefaultTools() {
             bus_.PublishOutbound(msg);
         }));
     tools_.Register(std::make_unique<kabot::agent::tools::SpawnTool>());
+    if (cron_) {
+        tools_.Register(std::make_unique<kabot::agent::tools::CronTool>(cron_));
+    }
 }
 
 void AgentLoop::AppendMemoryEntry(const std::string& session_key,
