@@ -11,6 +11,7 @@
 #include "agent/tools/message.hpp"
 #include "agent/tools/shell.hpp"
 #include "agent/tools/spawn.hpp"
+#include "agent/tools/tts.hpp"
 #include "agent/tools/web.hpp"
 #include "sandbox/sandbox_executor.hpp"
 
@@ -230,6 +231,7 @@ void AgentLoop::RegisterDefaultTools() {
             bus_.PublishOutbound(msg);
         }));
     tools_.Register(std::make_unique<kabot::agent::tools::SpawnTool>());
+    tools_.Register(std::make_unique<kabot::agent::tools::EdgeTtsTool>(workspace_));
     if (cron_) {
         tools_.Register(std::make_unique<kabot::agent::tools::CronTool>(cron_));
     }

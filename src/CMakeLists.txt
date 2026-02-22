@@ -153,6 +153,7 @@ set(KABOT_SOURCES
   agent/skills_loader.cpp
   agent/tools/filesystem.cpp
   agent/tools/cron.cpp
+  agent/tools/tts.cpp
   agent/tools/message.cpp
   agent/tools/shell.cpp
   agent/tools/spawn.cpp
