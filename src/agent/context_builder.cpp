@@ -40,7 +40,7 @@ std::string ContextBuilder::BuildSystemPrompt(
         if (!current_message.empty()) {
             std::cerr << "[context] qmd_query=" << current_message << std::endl;
             memory = BuildQmdContext(current_message);
-            if (!memory.empty()) {
+            if (!memory.empty() && false) {
                 std::cerr << "[context] qmd_memory\n" << memory << std::endl;
             }
         }
