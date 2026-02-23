@@ -61,13 +61,8 @@ void TelegramChannel::Start() {
     running_ = true;
     polling_ = true;
 
-    const bool use_curl = std::getenv("KABOT_TELEGRAM_USE_CURL") != nullptr ||
-                          std::getenv("HTTPS_PROXY") != nullptr ||
-                          std::getenv("HTTP_PROXY") != nullptr ||
-                          std::getenv("ALL_PROXY") != nullptr ||
-                          std::getenv("https_proxy") != nullptr ||
-                          std::getenv("http_proxy") != nullptr ||
-                          std::getenv("all_proxy") != nullptr;
+    const bool disable_curl = std::getenv("KABOT_TELEGRAM_DISABLE_CURL") != nullptr;
+    const bool use_curl = !disable_curl;
     if (use_curl) {
 #ifdef HAVE_CURL
         http_client_ = std::make_unique<TgBot::CurlHttpClient>();
