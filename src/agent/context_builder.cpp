@@ -1,7 +1,9 @@
 #include "agent/context_builder.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -28,6 +30,15 @@ std::string ContextBuilder::BuildSystemPrompt(
     oss << "# kabot\n\n";
     oss << "## Workspace\n";
     oss << "Your workspace is at: " << workspace_ << "\n\n";
+    const auto now = std::chrono::system_clock::now();
+    const auto now_time = std::chrono::system_clock::to_time_t(now);
+    std::tm now_tm{};
+#if defined(_WIN32)
+    localtime_s(&now_tm, &now_time);
+#else
+    localtime_r(&now_time, &now_tm);
+#endif
+    oss << "Current time: " << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S %Z") << "\n\n";
 
     const auto bootstrap = LoadBootstrapFiles();
     if (!bootstrap.empty()) {
