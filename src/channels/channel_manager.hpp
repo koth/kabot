@@ -25,6 +25,7 @@ public:
 private:
     void InitChannels();
     void RegisterTelegram(const kabot::config::TelegramConfig& config);
+    void RegisterLark(const kabot::config::LarkConfig& config);
     void RunOutboundDispatcher();
 
     kabot::bus::MessageBus& bus_;

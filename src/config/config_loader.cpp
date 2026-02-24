@@ -99,6 +99,32 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
                 }
             }
         }
+        if (channels.contains("lark") && channels["lark"].is_object()) {
+            const auto& lark = channels["lark"];
+            if (lark.contains("enabled") && lark["enabled"].is_boolean()) {
+                config.channels.lark.enabled = lark["enabled"].get<bool>();
+            }
+            if (lark.contains("appId") && lark["appId"].is_string()) {
+                config.channels.lark.app_id = lark["appId"].get<std::string>();
+            }
+            if (lark.contains("appSecret") && lark["appSecret"].is_string()) {
+                config.channels.lark.app_secret = lark["appSecret"].get<std::string>();
+            }
+            if (lark.contains("domain") && lark["domain"].is_string()) {
+                config.channels.lark.domain = lark["domain"].get<std::string>();
+            }
+            if (lark.contains("timeoutMs") && lark["timeoutMs"].is_number_integer()) {
+                config.channels.lark.timeout_ms = lark["timeoutMs"].get<int>();
+            }
+            if (lark.contains("allowFrom") && lark["allowFrom"].is_array()) {
+                config.channels.lark.allow_from.clear();
+                for (const auto& item : lark["allowFrom"]) {
+                    if (item.is_string()) {
+                        config.channels.lark.allow_from.push_back(item.get<std::string>());
+                    }
+                }
+            }
+        }
     }
 
     if (data.contains("providers") && data["providers"].is_object()) {
@@ -254,6 +280,38 @@ Config LoadConfig() {
     const auto telegram_allow_from = GetEnv("KABOT_TELEGRAM_ALLOW_FROM");
     if (!telegram_allow_from.empty()) {
         config.channels.telegram.allow_from = SplitCsv(telegram_allow_from);
+    }
+
+    const auto lark_enabled = GetEnv("KABOT_LARK_ENABLED");
+    if (!lark_enabled.empty()) {
+        config.channels.lark.enabled = ParseBool(lark_enabled);
+    }
+
+    const auto lark_app_id = GetEnv("KABOT_LARK_APP_ID");
+    if (!lark_app_id.empty()) {
+        config.channels.lark.app_id = lark_app_id;
+        config.channels.lark.enabled = true;
+    }
+
+    const auto lark_app_secret = GetEnv("KABOT_LARK_APP_SECRET");
+    if (!lark_app_secret.empty()) {
+        config.channels.lark.app_secret = lark_app_secret;
+        config.channels.lark.enabled = true;
+    }
+
+    const auto lark_domain = GetEnv("KABOT_LARK_DOMAIN");
+    if (!lark_domain.empty()) {
+        config.channels.lark.domain = lark_domain;
+    }
+
+    const auto lark_timeout = GetEnv("KABOT_LARK_TIMEOUT_MS");
+    if (!lark_timeout.empty()) {
+        config.channels.lark.timeout_ms = ParseInt(lark_timeout, config.channels.lark.timeout_ms);
+    }
+
+    const auto lark_allow_from = GetEnv("KABOT_LARK_ALLOW_FROM");
+    if (!lark_allow_from.empty()) {
+        config.channels.lark.allow_from = SplitCsv(lark_allow_from);
     }
 
     const auto openrouter_key = GetEnvFallback(

@@ -11,8 +11,18 @@ struct TelegramConfig {
     std::vector<std::string> allow_from;
 };
 
+struct LarkConfig {
+    bool enabled = false;
+    std::string app_id;
+    std::string app_secret;
+    std::string domain;
+    int timeout_ms = 10000;
+    std::vector<std::string> allow_from;
+};
+
 struct ChannelsConfig {
     TelegramConfig telegram;
+    LarkConfig lark;
 };
 
 struct ProviderConfig {

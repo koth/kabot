@@ -1,5 +1,6 @@
 #include "channels/channel_manager.hpp"
 
+#include "channels/lark_channel.hpp"
 #include "channels/telegram_channel.hpp"
 
 namespace kabot::channels {
@@ -13,6 +14,7 @@ ChannelManager::ChannelManager(const kabot::config::Config& config,
 
 void ChannelManager::InitChannels() {
     RegisterTelegram(config_.channels.telegram);
+    RegisterLark(config_.channels.lark);
 }
 
 void ChannelManager::Register(std::unique_ptr<ChannelBase> channel) {
@@ -68,6 +70,13 @@ void ChannelManager::RegisterTelegram(const kabot::config::TelegramConfig& confi
         return;
     }
     Register(std::make_unique<TelegramChannel>(config, bus_));
+}
+
+void ChannelManager::RegisterLark(const kabot::config::LarkConfig& config) {
+    if (!config.enabled) {
+        return;
+    }
+    Register(std::make_unique<LarkChannel>(config, bus_));
 }
 
 void ChannelManager::RunOutboundDispatcher() {

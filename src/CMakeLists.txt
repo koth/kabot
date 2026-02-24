@@ -47,6 +47,7 @@ if(APPLE)
 endif()
 
 option(KABOT_ENABLE_TELEGRAM "Enable Telegram channel support" ON)
+option(KABOT_ENABLE_LARK "Enable Lark channel support" ON)
 
 
 FetchContent_Declare(
@@ -67,7 +68,18 @@ FetchContent_Declare(
   GIT_TAG master
 )
 
+if(KABOT_ENABLE_LARK)
+  FetchContent_Declare(
+    lark_cpp
+    GIT_REPOSITORY https://github.com/EastTower16/lark_cpp.git
+    GIT_TAG main
+  )
+endif()
+
 FetchContent_MakeAvailable(nlohmann_json httplib croncpp)
+if(KABOT_ENABLE_LARK)
+  FetchContent_MakeAvailable(lark_cpp)
+endif()
 
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
@@ -140,6 +152,9 @@ target_compile_definitions(kabot_core INTERFACE CPPHTTPLIB_OPENSSL_SUPPORT)
 if(KABOT_ENABLE_TELEGRAM)
   target_link_libraries(kabot_core INTERFACE TgBot)
 endif()
+if(KABOT_ENABLE_LARK)
+  target_link_libraries(kabot_core INTERFACE lark_cpp)
+endif()
 
 # 收集所有源文件
 set(KABOT_SOURCES
@@ -170,6 +185,9 @@ set(KABOT_SOURCES
 
 if(KABOT_ENABLE_TELEGRAM)
   list(APPEND KABOT_SOURCES channels/telegram_channel.cpp)
+endif()
+if(KABOT_ENABLE_LARK)
+  list(APPEND KABOT_SOURCES channels/lark_channel.cpp)
 endif()
 
 add_executable(kabot_cli ${KABOT_SOURCES})
