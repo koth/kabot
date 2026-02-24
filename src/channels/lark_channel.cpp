@@ -147,7 +147,7 @@ std::string LarkChannel::ExtractTextFromContent(const std::string& msg_type,
                                                 const std::string& content) const {
     std::cout << "[lark] msg_type: " << msg_type << std::endl;
     std::cout << "[lark] content: " << content << std::endl;
-    if (msg_type == "text") {
+    if (msg_type == "text" || msg_type.empty() ) {
         auto json = nlohmann::json::parse(content, nullptr, false);
         if (!json.is_discarded() && json.contains("text") && json["text"].is_string()) {
             return json["text"].get<std::string>();
