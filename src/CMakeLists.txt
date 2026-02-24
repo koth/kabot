@@ -48,6 +48,7 @@ endif()
 
 option(KABOT_ENABLE_TELEGRAM "Enable Telegram channel support" ON)
 option(KABOT_ENABLE_LARK "Enable Lark channel support" ON)
+option(KABOT_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 
 
 FetchContent_Declare(
@@ -148,6 +149,10 @@ if(TARGET Boost::headers)
 endif()
 target_include_directories(kabot_core INTERFACE ${Boost_INCLUDE_DIRS})
 target_compile_definitions(kabot_core INTERFACE CPPHTTPLIB_OPENSSL_SUPPORT)
+if(KABOT_ENABLE_ASAN)
+  target_compile_options(kabot_core INTERFACE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(kabot_core INTERFACE -fsanitize=address)
+endif()
 
 if(KABOT_ENABLE_TELEGRAM)
   target_link_libraries(kabot_core INTERFACE TgBot)
