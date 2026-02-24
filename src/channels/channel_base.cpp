@@ -39,8 +39,8 @@ void ChannelBase::HandleMessage(
     const std::string& content,
     const std::vector<std::string>& media,
     const std::unordered_map<std::string, std::string>& metadata) {
-    if (!IsAllowed(sender_id)) {
-        std::cerr << "[channel] message blocked by allow_from: " << sender_id << std::endl;
+    if (!IsAllowed(sender_id) && !IsAllowed(chat_id)) {
+        std::cerr << "[channel] message blocked by allow_from: " << sender_id << " or " << chat_id << std::endl;
         return;
     }
     kabot::bus::InboundMessage msg{};

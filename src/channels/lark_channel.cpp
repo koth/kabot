@@ -79,14 +79,29 @@ void LarkChannel::Send(const kabot::bus::OutboundMessage& msg) {
         return;
     }
 
-    std::string chat_id = msg.chat_id;
-    if (chat_id.empty() && !msg.reply_to.empty()) {
+    std::string receive_id = msg.chat_id;
+    std::string receive_id_type = "chat_id";
+    if (receive_id.empty() && !msg.reply_to.empty()) {
         auto it = message_chat_ids_.find(msg.reply_to);
         if (it != message_chat_ids_.end()) {
-            chat_id = it->second;
+            receive_id = it->second;
+        }
+        auto it_type = message_receive_id_types_.find(msg.reply_to);
+        if (it_type != message_receive_id_types_.end()) {
+            receive_id_type = it_type->second;
         }
     }
-    if (chat_id.empty()) {
+    if (receive_id.empty()) {
+        auto it_id = msg.metadata.find("receive_id");
+        if (it_id != msg.metadata.end() && !it_id->second.empty()) {
+            receive_id = it_id->second;
+        }
+        auto it_type = msg.metadata.find("receive_id_type");
+        if (it_type != msg.metadata.end() && !it_type->second.empty()) {
+            receive_id_type = it_type->second;
+        }
+    }
+    if (receive_id.empty()) {
         return;
     }
 
@@ -94,17 +109,21 @@ void LarkChannel::Send(const kabot::bus::OutboundMessage& msg) {
     nlohmann::json body;
     body["text"] = msg.content;
 
-    if (!im_service_->CreateMessage(chat_id, msg_type, body.dump())) {
+    if (!im_service_->CreateMessage(receive_id, msg_type, body.dump(), receive_id_type)) {
         std::cerr << "[lark] failed to send message" << std::endl;
     }
 }
 
 void LarkChannel::HandleIncomingMessage(const lark::im::v1::MessageEvent& event) {
-    if (event.chat_id.empty()) {
-        
+    if (event.chat_id.empty() && event.sender_id.empty()) {
         return;
     }
-    std::string sender_id = event.sender_id.empty() ? event.chat_id : event.sender_id;
+
+    const bool use_open_id = event.chat_id.empty();
+    const std::string receive_id = use_open_id ? event.sender_id : event.chat_id;
+    const std::string receive_id_type = use_open_id ? "open_id" : "chat_id";
+    const std::string sender_id = event.sender_id.empty() ? receive_id : event.sender_id;
+    const std::string chat_id = event.chat_id.empty() ? receive_id : event.chat_id;
     const auto content = ExtractTextFromContent(event.msg_type, event.content);
 
     std::unordered_map<std::string, std::string> metadata;
@@ -112,14 +131,16 @@ void LarkChannel::HandleIncomingMessage(const lark::im::v1::MessageEvent& event)
     metadata["sender_id"] = sender_id;
     metadata["msg_type"] = event.msg_type;
     metadata["raw_content"] = event.content;
-    metadata["chat_id"] = event.chat_id;
+    metadata["chat_id"] = chat_id;
+    metadata["receive_id"] = receive_id;
+    metadata["receive_id_type"] = receive_id_type;
 
     if (!event.message_id.empty()) {
-        message_chat_ids_[event.message_id] = event.chat_id;
+        message_chat_ids_[event.message_id] = receive_id;
+        message_receive_id_types_[event.message_id] = receive_id_type;
     }
-    
 
-    HandleMessage(sender_id, event.chat_id, content, {}, metadata);
+    HandleMessage(sender_id, chat_id, content, {}, metadata);
 }
 
 std::string LarkChannel::ExtractTextFromContent(const std::string& msg_type,

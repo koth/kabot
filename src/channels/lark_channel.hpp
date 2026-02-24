@@ -44,6 +44,7 @@ private:
     std::atomic<bool> running_{false};
 
     std::unordered_map<std::string, std::string> message_chat_ids_;
+    std::unordered_map<std::string, std::string> message_receive_id_types_;
 };
 
 }  // namespace kabot::channels
