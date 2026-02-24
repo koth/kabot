@@ -101,13 +101,15 @@ void LarkChannel::Send(const kabot::bus::OutboundMessage& msg) {
 
 void LarkChannel::HandleIncomingMessage(const lark::im::v1::MessageEvent& event) {
     if (event.chat_id.empty()) {
+        
         return;
     }
+    std::string sender_id = event.sender_id.empty() ? event.chat_id : event.sender_id;
     const auto content = ExtractTextFromContent(event.msg_type, event.content);
 
     std::unordered_map<std::string, std::string> metadata;
     metadata["message_id"] = event.message_id;
-    metadata["sender_id"] = event.sender_id;
+    metadata["sender_id"] = sender_id;
     metadata["msg_type"] = event.msg_type;
     metadata["raw_content"] = event.content;
     metadata["chat_id"] = event.chat_id;
@@ -115,8 +117,9 @@ void LarkChannel::HandleIncomingMessage(const lark::im::v1::MessageEvent& event)
     if (!event.message_id.empty()) {
         message_chat_ids_[event.message_id] = event.chat_id;
     }
+    
 
-    HandleMessage(event.sender_id, event.chat_id, content, {}, metadata);
+    HandleMessage(sender_id, event.chat_id, content, {}, metadata);
 }
 
 std::string LarkChannel::ExtractTextFromContent(const std::string& msg_type,
