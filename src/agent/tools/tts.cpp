@@ -121,7 +121,7 @@ std::string DefaultAudioPath(const std::string& workspace) {
     const auto stamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
     std::ostringstream oss;
-    oss << workspace << "/tts_" << stamp << ".mp3";
+    oss << workspace << "tts_out/" << stamp << ".mp3";
     return oss.str();
 }
 
