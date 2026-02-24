@@ -11,7 +11,7 @@ public:
     explicit ExecTool(std::string working_dir);
 
     std::string Name() const override { return "exec"; }
-    std::string Description() const override { return "Execute a shell command (disabled)."; }
+    std::string Description() const override { return "Execute a shell command."; }
     std::string ParametersJson() const override;
     std::string Execute(const std::unordered_map<std::string, std::string>& params) override;
 
