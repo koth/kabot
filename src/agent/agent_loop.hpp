@@ -45,8 +45,7 @@ private:
     kabot::bus::OutboundMessage ProcessSystemMessage(const kabot::bus::InboundMessage& msg);
     void RegisterDefaultTools();
     void AppendMemoryEntry(const std::string& session_key,
-                           const std::string& user_content,
-                           const std::string& assistant_content);
+                           const std::string& memory_block);
     void UpdateQmdIndex() const;
 };
 

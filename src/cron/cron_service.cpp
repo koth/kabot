@@ -324,10 +324,26 @@ void CronService::SaveStore() {
 
 void CronService::RecomputeNextRuns() {
     const auto now = NowMs();
+    bool changed = false;
     for (auto& job : store_.jobs) {
         if (job.enabled) {
             job.state.next_run_at_ms = ComputeNextRun(job.schedule, now);
+            if (!job.state.next_run_at_ms.has_value() &&
+                job.schedule.kind == CronScheduleKind::At &&
+                job.schedule.at_ms.has_value() &&
+                job.schedule.at_ms.value() <= now) {
+                job.enabled = false;
+                job.id.clear();
+                changed = true;
+            }
         }
+    }
+    if (changed) {
+        store_.jobs.erase(
+            std::remove_if(store_.jobs.begin(), store_.jobs.end(), [](const CronJob& job) {
+                return job.id.empty();
+            }),
+            store_.jobs.end());
     }
 }
 

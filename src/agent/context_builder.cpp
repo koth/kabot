@@ -63,6 +63,12 @@ std::string ContextBuilder::BuildSystemPrompt(
         oss << "# Memory\n\n" << memory << "\n\n";
     }
 
+    oss << "## Memory Writing\n";
+    oss << "Only record durable information: preferences, long-term facts, goal changes, key conclusions, task summaries.\n";
+    oss << "If such memory appears in this turn, append a block at the end of your reply in the format:\n\n";
+    oss << "<kabot_memory>\n- item\n</kabot_memory>\n\n";
+    oss << "If there is nothing to store, omit the block.\n\n";
+
     auto active_names = skill_names;
     if (active_names.empty()) {
         active_names = skills_.GetAlwaysSkills();
