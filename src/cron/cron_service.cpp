@@ -335,18 +335,20 @@ bool CronService::ExecuteJob(CronJob& job) {
     const auto start = NowMs();
     const std::string job_id = job.id;
     const CronJob snapshot = job;
+    std::string last_status;
+    std::string last_error;
     try {
         if (on_job_) {
             on_job_(snapshot);
         }
-        job.state.last_status = "ok";
-        job.state.last_error.clear();
+        last_status = "ok";
+        last_error.clear();
     } catch (const std::exception& ex) {
-        job.state.last_status = "error";
-        job.state.last_error = ex.what();
+        last_status = "error";
+        last_error = ex.what();
     } catch (...) {
-        job.state.last_status = "error";
-        job.state.last_error = "unknown error";
+        last_status = "error";
+        last_error = "unknown error";
     }
 
     auto it = std::find_if(store_.jobs.begin(), store_.jobs.end(), [&](const CronJob& item) {
@@ -356,8 +358,8 @@ bool CronService::ExecuteJob(CronJob& job) {
         return true;
     }
 
-    it->state.last_status = job.state.last_status;
-    it->state.last_error = job.state.last_error;
+    it->state.last_status = last_status;
+    it->state.last_error = last_error;
     it->state.last_run_at_ms = start;
     it->updated_at_ms = NowMs();
 
