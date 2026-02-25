@@ -110,7 +110,12 @@ void LarkChannel::Send(const kabot::bus::OutboundMessage& msg) {
     body["text"] = msg.content;
 
     if (!im_service_->CreateMessage(receive_id, msg_type, body.dump(), receive_id_type)) {
-        std::cerr << "[lark] failed to send message" << std::endl;
+        std::cerr << "[lark] failed to send message"
+                  << " receive_id=" << receive_id
+                  << " receive_id_type=" << receive_id_type
+                  << " msg_type=" << msg_type
+                  << " content=[" << msg.content<<"]"
+                  << std::endl;
     }
 }
 
