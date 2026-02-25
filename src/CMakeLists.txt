@@ -198,7 +198,10 @@ endif()
 add_executable(kabot_cli ${KABOT_SOURCES})
 target_link_libraries(kabot_cli PRIVATE kabot_core)
 
-add_library(kabot_tts STATIC agent/tools/tts.cpp)
+add_library(kabot_tts STATIC
+  agent/tools/tts.cpp
+  sandbox/sandbox_executor.cpp
+)
 target_link_libraries(kabot_tts PRIVATE kabot_core)
 
 add_executable(tts_test tts_test.cpp)

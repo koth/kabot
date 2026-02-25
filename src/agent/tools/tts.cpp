@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cctype>
 #include <cstddef>
+#include <filesystem>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -27,6 +28,7 @@
 #include <openssl/sha.h>
 
 #include "nlohmann/json.hpp"
+#include "sandbox/sandbox_executor.hpp"
 
 namespace kabot::agent::tools {
 namespace {
@@ -144,7 +146,7 @@ EdgeTtsTool::EdgeTtsTool(std::string workspace)
     : workspace_(std::move(workspace)) {}
 
 std::string EdgeTtsTool::ParametersJson() const {
-    return R"({"type":"object","properties":{"text":{"type":"string"},"voice":{"type":"string"},"lang":{"type":"string"},"output_format":{"type":"string"},"rate":{"type":"string"},"pitch":{"type":"string"},"volume":{"type":"string"},"save_subtitles":{"type":"boolean"},"audio_path":{"type":"string"},"timeout_ms":{"type":"integer"}},"required":["text"]})";
+    return R"({"type":"object","properties":{"text":{"type":"string"},"voice":{"type":"string"},"lang":{"type":"string"},"output_format":{"type":"string"},"rate":{"type":"string"},"pitch":{"type":"string"},"volume":{"type":"string"},"save_subtitles":{"type":"boolean"},"audio_path":{"type":"string"},"auto_play":{"type":"boolean"},"timeout_ms":{"type":"integer"}},"required":["text"]})";
 }
 
 std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::string>& params) {
@@ -161,6 +163,7 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
     const auto pitch = GetParam(params, "pitch").empty() ? "default" : GetParam(params, "pitch");
     const auto volume = GetParam(params, "volume").empty() ? "default" : GetParam(params, "volume");
     const bool save_subtitles = ParseBool(GetParam(params, "save_subtitles"), false);
+    const bool auto_play = ParseBool(GetParam(params, "auto_play"), false);
     const auto audio_path = GetParam(params, "audio_path").empty()
         ? DefaultAudioPath(workspace_)
         : GetParam(params, "audio_path");
@@ -288,15 +291,44 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
         boost::system::error_code close_ec;
         ws.close(boost::beast::websocket::close_code::normal, close_ec);
 
+        audio_out.flush();
+        audio_out.close();
+
         std::string subtitle_path;
         if (save_subtitles) {
             subtitle_path = audio_path + ".json";
             WriteSubtitles(subtitle_path, subtitles);
         }
 
+        nlohmann::json autoplay_result = nullptr;
+        bool audio_deleted = false;
+        if (auto_play) {
+            const std::string command = "ffplay -nodisp -autoexit -hide_banner -loglevel error \"" +
+                audio_path + "\"";
+            const auto exec_result = kabot::sandbox::SandboxExecutor::Run(
+                command,
+                workspace_,
+                std::chrono::seconds(120));
+            autoplay_result = nlohmann::json{
+                {"exit_code", exec_result.exit_code},
+                {"timed_out", exec_result.timed_out},
+                {"blocked", exec_result.blocked},
+                {"stderr", exec_result.error.empty() ? nlohmann::json(nullptr)
+                                                     : nlohmann::json(exec_result.error)}
+            };
+            if (!exec_result.timed_out && !exec_result.blocked && exec_result.exit_code == 0) {
+                std::error_code remove_ec;
+                audio_deleted = std::filesystem::remove(audio_path, remove_ec);
+            }
+        }
+
+        const auto audio_path_json = auto_play ? nlohmann::json(nullptr) : nlohmann::json(audio_path);
         nlohmann::json result = {
-            {"audio_path", audio_path},
-            {"subtitle_path", subtitle_path.empty() ? nlohmann::json(nullptr) : nlohmann::json(subtitle_path)}
+            {"audio_path", audio_path_json},
+            {"subtitle_path", subtitle_path.empty() ? nlohmann::json(nullptr) : nlohmann::json(subtitle_path)},
+            {"auto_play", auto_play},
+            {"auto_play_result", autoplay_result},
+            {"audio_deleted", audio_deleted}
         };
         return result.dump(2);
     } catch (const std::exception& ex) {
