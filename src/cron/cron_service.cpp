@@ -333,9 +333,11 @@ void CronService::RecomputeNextRuns() {
 
 bool CronService::ExecuteJob(CronJob& job) {
     const auto start = NowMs();
+    const std::string job_id = job.id;
+    const CronJob snapshot = job;
     try {
         if (on_job_) {
-            on_job_(job);
+            on_job_(snapshot);
         }
         job.state.last_status = "ok";
         job.state.last_error.clear();
@@ -347,18 +349,27 @@ bool CronService::ExecuteJob(CronJob& job) {
         job.state.last_error = "unknown error";
     }
 
-    job.state.last_run_at_ms = start;
-    job.updated_at_ms = NowMs();
+    auto it = std::find_if(store_.jobs.begin(), store_.jobs.end(), [&](const CronJob& item) {
+        return item.id == job_id;
+    });
+    if (it == store_.jobs.end()) {
+        return true;
+    }
 
-    if (job.schedule.kind == CronScheduleKind::At) {
-        if (job.delete_after_run) {
+    it->state.last_status = job.state.last_status;
+    it->state.last_error = job.state.last_error;
+    it->state.last_run_at_ms = start;
+    it->updated_at_ms = NowMs();
+
+    if (snapshot.schedule.kind == CronScheduleKind::At) {
+        if (snapshot.delete_after_run) {
             return true;
         }
-        job.enabled = false;
-        job.state.next_run_at_ms.reset();
+        it->enabled = false;
+        it->state.next_run_at_ms.reset();
         return false;
     } else {
-        job.state.next_run_at_ms = ComputeNextRun(job.schedule, NowMs());
+        it->state.next_run_at_ms = ComputeNextRun(snapshot.schedule, NowMs());
     }
     return false;
 }

@@ -226,8 +226,23 @@ std::string CronTool::Execute(const std::unordered_map<std::string, std::string>
         job.payload.channel = GetParam(params, "channel");
         job.payload.to = GetParam(params, "to");
 
-        const auto kind = ToLower(GetParam(params, "kind"));
-        if (kind.empty() || kind == "every") {
+        auto kind = ToLower(GetParam(params, "kind"));
+        if (kind.empty()) {
+            const bool has_at = !GetParam(params, "at").empty() || !GetParam(params, "at_ms").empty();
+            const bool has_expr = !GetParamAlias(params, "cron_expr", "expr").empty();
+            const bool has_every = !GetParam(params, "every_ms").empty() ||
+                !GetParamAlias(params, "every_seconds", "every_s").empty();
+            if (has_at) {
+                kind = "at";
+            } else if (has_expr) {
+                kind = "cron";
+            } else if (has_every) {
+                kind = "every";
+            } else {
+                return "Error: kind is required (cannot infer from at/expr/every parameters)";
+            }
+        }
+        if (kind == "every") {
             job.schedule.kind = kabot::cron::CronScheduleKind::Every;
             auto every_ms = ParseLongLong(GetParam(params, "every_ms"));
             if (!every_ms.has_value()) {
