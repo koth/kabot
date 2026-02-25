@@ -45,16 +45,66 @@ std::string ExtractMemoryBlock(const std::string& content) {
 std::string StripMemoryBlock(const std::string& content) {
     const std::string start_tag = "<kabot_memory>";
     const std::string end_tag = "</kabot_memory>";
-    const auto start = content.find(start_tag);
-    if (start == std::string::npos) {
-        return Trim(content);
+    const std::string open_prefix = "<kabot_memory";
+    const std::string close_prefix = "</kabot_memory";
+    std::string stripped = content;
+
+    auto to_lower = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        return value;
+    };
+
+    while (true) {
+        const auto lower = to_lower(stripped);
+        const auto start = lower.find(open_prefix);
+        if (start == std::string::npos) {
+            break;
+        }
+        auto tag_end = stripped.find('>', start + open_prefix.size());
+        if (tag_end == std::string::npos) {
+            stripped.erase(start, open_prefix.size());
+            continue;
+        }
+        const auto end = lower.find(end_tag, tag_end + 1);
+        if (end == std::string::npos) {
+            stripped.erase(start, tag_end - start + 1);
+            continue;
+        }
+        stripped.erase(start, end - start + end_tag.size());
     }
-    const auto end = content.find(end_tag, start + start_tag.size());
-    if (end == std::string::npos) {
-        return Trim(content);
+
+    while (true) {
+        const auto lower = to_lower(stripped);
+        const auto end_pos = lower.find(close_prefix);
+        if (end_pos == std::string::npos) {
+            break;
+        }
+        auto tag_end = stripped.find('>', end_pos + close_prefix.size());
+        if (tag_end == std::string::npos) {
+            stripped.erase(end_pos, close_prefix.size());
+            continue;
+        }
+        stripped.erase(end_pos, tag_end - end_pos + 1);
     }
-    std::string stripped = content.substr(0, start);
-    stripped += content.substr(end + end_tag.size());
+
+    while (true) {
+        const auto lower = to_lower(stripped);
+        const auto pos = lower.find(start_tag);
+        if (pos == std::string::npos) {
+            break;
+        }
+        stripped.erase(pos, start_tag.size());
+    }
+    while (true) {
+        const auto lower = to_lower(stripped);
+        const auto pos = lower.find(end_tag);
+        if (pos == std::string::npos) {
+            break;
+        }
+        stripped.erase(pos, end_tag.size());
+    }
+
     return Trim(stripped);
 }
 
