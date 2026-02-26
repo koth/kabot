@@ -9,7 +9,7 @@ Use the `cron` tool to schedule reminders or recurring tasks.
 
 ## Three Modes
 
-1. **Reminder** - message is sent directly to user
+1. **Reminder** - message is sent directly to user, always set mode to 'reminder'
 2. **Task** - message is a task description, agent executes and sends result
 3. **One-time** - runs once at a specific time, then auto-deletes
 
@@ -18,7 +18,7 @@ Use the `cron` tool to schedule reminders or recurring tasks.
 
 Fixed reminder:
 ```
-cron(action="add", message="Time to take a break!", every_seconds=1200)
+cron(action="add", message="Time to take a break!", every_seconds=1200, mode="reminder")
 ```
 
 Dynamic task (agent executes each time):
@@ -36,9 +36,9 @@ cron(action="add", message="Remind me about the meeting", at="<ISO datetime>")
 cron(action="add", message="播放当前天气情况", at="<ISO datetime>")
 ```
 
-延迟发消息（需要 deliver=true）：
+延迟发消息：
 ```
-cron(action="add", message="<要发的消息>", at="<ISO datetime>", deliver=true)
+cron(action="add", message="<要发的消息>", at="<ISO datetime>", mode="reminder")
 ```
 
 Timezone-aware cron:
@@ -63,7 +63,7 @@ cron(action="remove", job_id="abc123")
 | 9am Vancouver time daily | cron_expr: "0 9 * * *", tz: "America/Vancouver" |
 | at a specific time | at: ISO datetime string (compute from current time) |
 | “2分钟后，播放当前天气情况” | 只创建一次性任务；message: "播放当前天气情况"；at: 当前时间+2分钟 |
-| “5分钟后提醒我喝水” | 只创建一次性任务；message: "该喝水了"；at: 当前时间+5分钟；deliver: true |
+| “5分钟后提醒我喝水” | 只创建一次性任务；message: "该喝水了"；at: 当前时间+5分钟；mode: reminder |
 
 ## Timezone
 
