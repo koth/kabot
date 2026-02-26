@@ -1,6 +1,7 @@
 ---
 name: cron
 description: Schedule reminders and recurring tasks.
+metadata: {"kabot":{"always":true}}
 ---
 
 # Cron
@@ -16,7 +17,12 @@ Use the `cron` tool to schedule reminders or recurring tasks.
 ## Examples
 
 
-Fixed reminder:
+One-time reminder(compute ISO datetime from current time):
+```
+cron(action="add", message="Go to sleep!", at="<ISO datetime>", mode="reminder")
+```
+
+Repeated reminder:
 ```
 cron(action="add", message="Time to take a break!", every_seconds=1200, mode="reminder")
 ```
