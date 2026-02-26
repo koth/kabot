@@ -120,6 +120,11 @@ nlohmann::json BuildStateJson(const kabot::cron::CronJobState& state) {
 CronTool::CronTool(kabot::cron::CronService* cron)
     : cron_(cron) {}
 
+void CronTool::SetContext(const std::string& channel, const std::string& to) {
+    default_channel_ = channel;
+    default_to_ = to;
+}
+
 std::string CronTool::ParametersJson() const {
     return R"({"type":"object","properties":{"action":{"type":"string","enum":["add","list","remove","enable","disable","run","status"]},"job_id":{"type":"string"},"id":{"type":"string"},"name":{"type":"string"},"mode":{"type":"string","enum":["reminder","task"]},"kind":{"type":"string","enum":["at","every","cron"]},"at":{"type":"string","description":"ISO local time: YYYY-MM-DDTHH:MM:SS"},"at_ms":{"type":"integer"},"every_seconds":{"type":"integer"},"every_ms":{"type":"integer"},"every_s":{"type":"integer"},"cron_expr":{"type":"string"},"expr":{"type":"string"},"tz":{"type":"string"},"message":{"type":"string"},"deliver":{"type":"boolean"},"channel":{"type":"string"},"to":{"type":"string"},"delete_after_run":{"type":"boolean"},"force":{"type":"boolean"},"enabled":{"type":"boolean"}},"required":["action"]})";
 }
@@ -225,6 +230,14 @@ std::string CronTool::Execute(const std::unordered_map<std::string, std::string>
         job.payload.deliver = ParseBool(GetParam(params, "deliver"), false);
         job.payload.channel = GetParam(params, "channel");
         job.payload.to = GetParam(params, "to");
+        if (job.payload.deliver) {
+            if (job.payload.channel.empty()) {
+                job.payload.channel = default_channel_;
+            }
+            if (job.payload.to.empty()) {
+                job.payload.to = default_to_;
+            }
+        }
 
         auto kind = ToLower(GetParam(params, "kind"));
         if (kind.empty()) {

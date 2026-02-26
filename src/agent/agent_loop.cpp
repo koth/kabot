@@ -246,6 +246,11 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
             message_tool->SetContext(msg.channel, msg.chat_id);
         }
     }
+    if (auto* tool = tools_.Get("cron")) {
+        if (auto* cron_tool = dynamic_cast<kabot::agent::tools::CronTool*>(tool)) {
+            cron_tool->SetContext(msg.channel, msg.chat_id);
+        }
+    }
     std::string content = msg.content;
     bool reset_session = false;
     if (content.rfind("/new", 0) == 0) {
@@ -406,6 +411,11 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
     if (auto* tool = tools_.Get("message")) {
         if (auto* message_tool = dynamic_cast<kabot::agent::tools::MessageTool*>(tool)) {
             message_tool->SetContext(origin_channel, origin_chat_id);
+        }
+    }
+    if (auto* tool = tools_.Get("cron")) {
+        if (auto* cron_tool = dynamic_cast<kabot::agent::tools::CronTool*>(tool)) {
+            cron_tool->SetContext(origin_channel, origin_chat_id);
         }
     }
 

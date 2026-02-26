@@ -155,7 +155,7 @@ int RunGateway() {
             "cron:" + job.id);
         if (job.payload.deliver && !job.payload.to.empty()) {
             kabot::bus::OutboundMessage outbound{};
-            outbound.channel = job.payload.channel.empty() ? "telegram" : job.payload.channel;
+            outbound.channel = job.payload.channel.empty() ? "lark" : job.payload.channel;
             outbound.chat_id = job.payload.to;
             outbound.content = response;
             bus.PublishOutbound(outbound);
