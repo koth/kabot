@@ -36,6 +36,11 @@ cron(action="add", message="Remind me about the meeting", at="<ISO datetime>")
 cron(action="add", message="播放当前天气情况", at="<ISO datetime>")
 ```
 
+延迟发消息（需要 deliver=true）：
+```
+cron(action="add", message="<要发的消息>", at="<ISO datetime>", deliver=true)
+```
+
 Timezone-aware cron:
 ```
 cron(action="add", message="Morning standup", cron_expr="0 9 * * 1-5", tz="America/Vancouver")
@@ -58,6 +63,7 @@ cron(action="remove", job_id="abc123")
 | 9am Vancouver time daily | cron_expr: "0 9 * * *", tz: "America/Vancouver" |
 | at a specific time | at: ISO datetime string (compute from current time) |
 | “2分钟后，播放当前天气情况” | 只创建一次性任务；message: "播放当前天气情况"；at: 当前时间+2分钟 |
+| “5分钟后提醒我喝水” | 只创建一次性任务；message: "该喝水了"；at: 当前时间+5分钟；deliver: true |
 
 ## Timezone
 
