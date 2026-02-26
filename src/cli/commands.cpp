@@ -150,17 +150,24 @@ int RunGateway() {
         return agent.ProcessDirect(prompt, "heartbeat");
     };
     on_cron = [&agent, &bus](const kabot::cron::CronJob& job) {
-        const auto response = agent.ProcessDirect(
+        if (job.payload.deliver) {
+            kabot::bus::OutboundMessage outbound{};
+            outbound.channel = job.payload.channel.empty() ? "lark" : job.payload.channel;
+            outbound.chat_id = job.payload.to;
+            outbound.content = job.payload.message;
+            bus.PublishOutbound(outbound);
+            return job.payload.message;
+        }else{
+            const auto response = agent.ProcessDirect(
             job.payload.message,
             "cron:" + job.id);
-        if (job.payload.deliver && !job.payload.to.empty()) {
             kabot::bus::OutboundMessage outbound{};
             outbound.channel = job.payload.channel.empty() ? "lark" : job.payload.channel;
             outbound.chat_id = job.payload.to;
             outbound.content = response;
             bus.PublishOutbound(outbound);
+            return response;
         }
-        return response;
     };
 
     kabot::channels::ChannelManager channels(config, bus);

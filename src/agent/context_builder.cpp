@@ -63,11 +63,17 @@ std::string ContextBuilder::BuildSystemPrompt(
         oss << "# Memory\n\n" << memory << "\n\n";
     }
 
+
+
     oss << "## Memory Writing\n";
     oss << "Only record durable information: preferences, long-term facts, goal changes, key conclusions, task summaries.\n";
     oss << "If such memory appears in this turn (or the user explicitly marks it as important), append a block at the end of your reply in the format:\n\n";
     oss << "<kabot_memory>\n- item\n</kabot_memory>\n\n";
     oss << "If there is nothing to store, omit the block.\n\n";
+
+    oss << "## Daily Memory\n";
+    oss << "Daily memory is stored at: " << workspace_ << "/memory/YYYY-MM-DD.md\n\n";
+
 
     auto active_names = skill_names;
     if (active_names.empty()) {
