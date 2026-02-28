@@ -150,6 +150,10 @@ int RunGateway() {
         return agent.ProcessDirect(prompt, "heartbeat");
     };
     on_cron = [&agent, &bus](const kabot::cron::CronJob& job) {
+        std::cout << "[cron] job payload deliver=" << (job.payload.deliver ? "true" : "false")
+                  << " channel=" << (job.payload.channel.empty() ? "(empty)" : job.payload.channel)
+                  << " to=" << (job.payload.to.empty() ? "(empty)" : job.payload.to)
+                  << " message=" << job.payload.message << std::endl;
         if (job.payload.deliver) {
             kabot::bus::OutboundMessage outbound{};
             outbound.channel = job.payload.channel.empty() ? "lark" : job.payload.channel;

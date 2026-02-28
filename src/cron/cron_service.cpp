@@ -4,8 +4,10 @@
 #include <chrono>
 #include <fstream>
 #include <limits>
+#include <iostream>
 #include <random>
 #include <utility>
+#include <sstream>
 
 #include "croncpp.h"
 
@@ -25,6 +27,23 @@ std::string GenerateId() {
         id.push_back(kChars[dist(gen)]);
     }
     return id;
+}
+
+std::string NormalizeCronExpr(const std::string& expr) {
+    std::istringstream stream(expr);
+    std::vector<std::string> fields;
+    std::string token;
+    while (stream >> token) {
+        fields.push_back(token);
+    }
+    if (fields.size() == 5) {
+        std::string normalized = "0";
+        for (const auto& field : fields) {
+            normalized.append(" ").append(field);
+        }
+        return normalized;
+    }
+    return expr;
 }
 
 std::string ScheduleKindToString(CronScheduleKind kind) {
@@ -397,26 +416,35 @@ std::optional<long long> CronService::ComputeNextRun(const CronSchedule& schedul
         if (schedule.at_ms.has_value() && schedule.at_ms.value() > now_ms) {
             return schedule.at_ms;
         }
+        std::cerr << "[cron] compute next run failed: at schedule is in the past or missing" << std::endl;
         return std::nullopt;
     }
     if (schedule.kind == CronScheduleKind::Every) {
         if (!schedule.every_ms.has_value() || schedule.every_ms.value() <= 0) {
+            std::cerr << "[cron] compute next run failed: invalid every_ms" << std::endl;
             return std::nullopt;
         }
         return now_ms + schedule.every_ms.value();
     }
     if (schedule.kind == CronScheduleKind::Cron && !schedule.expr.empty()) {
         try {
-            const auto cron_expr = ::cron::make_cron(schedule.expr);
+            const auto cron_expr = ::cron::make_cron(NormalizeCronExpr(schedule.expr));
             const auto now_tp = std::chrono::system_clock::time_point(std::chrono::milliseconds(now_ms));
             const auto next_tp = ::cron::cron_next(cron_expr, now_tp);
             const auto next_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 next_tp.time_since_epoch()).count();
             return next_ms;
+        } catch (const std::exception& ex) {
+            std::cerr << "[cron] compute next run failed: invalid cron expr '" << schedule.expr
+                      << "' error=" << ex.what() << std::endl;
+            return std::nullopt;
         } catch (...) {
+            std::cerr << "[cron] compute next run failed: invalid cron expr '" << schedule.expr
+                      << "'" << std::endl;
             return std::nullopt;
         }
     }
+    std::cerr << "[cron] compute next run failed: invalid schedule kind or empty expr" << std::endl;
     return std::nullopt;
 }
 
