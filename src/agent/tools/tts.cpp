@@ -8,6 +8,7 @@
 #include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
@@ -164,7 +165,8 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
     const auto volume = GetParam(params, "volume").empty() ? "default" : GetParam(params, "volume");
     const bool save_subtitles = ParseBool(GetParam(params, "save_subtitles"), false);
     const bool auto_play = ParseBool(GetParam(params, "auto_play"), false);
-    const auto audio_path = GetParam(params, "audio_path").empty()
+    const bool use_default_path = GetParam(params, "audio_path").empty();
+    auto audio_path = use_default_path
         ? DefaultAudioPath(workspace_)
         : GetParam(params, "audio_path");
 
@@ -302,13 +304,33 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
 
         nlohmann::json autoplay_result = nullptr;
         bool audio_deleted = false;
+        if (use_default_path) {
+            std::filesystem::path source_path(audio_path);
+            std::filesystem::path opus_path = source_path;
+            opus_path.replace_extension(".opus");
+            const std::string command = "ffmpeg -y -i \"" + audio_path
+                + "\" -c:a libopus -b:a 48k \"" + opus_path.string() + "\"";
+            const auto exec_result = kabot::sandbox::SandboxExecutor::Run(
+                command,
+                workspace_,
+                std::chrono::seconds(240));
+            if (!exec_result.timed_out && !exec_result.blocked && exec_result.exit_code == 0) {
+                std::error_code remove_ec;
+                audio_deleted = std::filesystem::remove(audio_path, remove_ec);
+                audio_path = opus_path.string();
+            } else {
+                std::cerr << "[tts] opus convert failed: "
+                          << (exec_result.error.empty() ? "unknown" : exec_result.error)
+                          << std::endl;
+            }
+        }
         if (auto_play) {
             const std::string command = "ffplay -nodisp -autoexit -hide_banner -loglevel error \"" +
                 audio_path + "\"";
             const auto exec_result = kabot::sandbox::SandboxExecutor::Run(
                 command,
                 workspace_,
-                std::chrono::seconds(120));
+                std::chrono::seconds(240));
             autoplay_result = nlohmann::json{
                 {"exit_code", exec_result.exit_code},
                 {"timed_out", exec_result.timed_out},
