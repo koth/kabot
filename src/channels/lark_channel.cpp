@@ -1,5 +1,8 @@
 #include "channels/lark_channel.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <iostream>
 
 #include <nlohmann/json.hpp>
@@ -14,6 +17,39 @@
 #undef private
 
 namespace kabot::channels {
+namespace {
+
+std::string ToLower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value;
+}
+
+std::string GetExtensionLower(const std::string& path) {
+    std::filesystem::path fs_path(path);
+    return ToLower(fs_path.extension().string());
+}
+
+std::string GetFileName(const std::string& path) {
+    std::filesystem::path fs_path(path);
+    return fs_path.filename().string();
+}
+
+bool IsImageExtension(const std::string& ext) {
+    return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif"
+        || ext == ".bmp" || ext == ".webp";
+}
+
+bool IsAudioExtension(const std::string& ext) {
+    return ext == ".mp3" || ext == ".wav" || ext == ".m4a" || ext == ".aac"
+        || ext == ".ogg" || ext == ".opus";
+}
+
+bool IsVideoExtension(const std::string& ext) {
+    return ext == ".mp4" || ext == ".mov" || ext == ".webm" || ext == ".mkv";
+}
+
+}  // namespace
 
 LarkChannel::LarkChannel(const kabot::config::LarkConfig& config,
                          kabot::bus::MessageBus& bus)
@@ -105,17 +141,74 @@ void LarkChannel::Send(const kabot::bus::OutboundMessage& msg) {
         return;
     }
 
-    const std::string msg_type = "text";
-    nlohmann::json body;
-    body["text"] = msg.content;
+    if (!msg.content.empty()) {
+        const std::string msg_type = "text";
+        nlohmann::json body;
+        body["text"] = msg.content;
 
-    if (!im_service_->CreateMessage(receive_id, msg_type, body.dump(), receive_id_type)) {
-        std::cerr << "[lark] failed to send message"
-                  << " receive_id=" << receive_id
-                  << " receive_id_type=" << receive_id_type
-                  << " msg_type=" << msg_type
-                  << " content=[" << msg.content<<"]"
-                  << std::endl;
+        if (!im_service_->CreateMessage(receive_id, msg_type, body.dump(), receive_id_type)) {
+            std::cerr << "[lark] failed to send message"
+                      << " receive_id=" << receive_id
+                      << " receive_id_type=" << receive_id_type
+                      << " msg_type=" << msg_type
+                      << " content=[" << msg.content << "]"
+                      << std::endl;
+        }
+    }
+
+    for (const auto& media_path : msg.media) {
+        if (media_path.empty()) {
+            continue;
+        }
+        const auto ext = GetExtensionLower(media_path);
+        const auto file_name = GetFileName(media_path);
+        if (IsImageExtension(ext)) {
+            std::string image_key;
+            if (!im_service_->UploadImage(media_path, &image_key)) {
+                std::cerr << "[lark] failed to upload image"
+                          << " path=" << media_path
+                          << std::endl;
+                continue;
+            }
+            nlohmann::json content;
+            content["image_key"] = image_key;
+            if (!im_service_->CreateMessage(receive_id, "image", content.dump(), receive_id_type)) {
+                std::cerr << "[lark] failed to send image"
+                          << " receive_id=" << receive_id
+                          << " receive_id_type=" << receive_id_type
+                          << " image_key=" << image_key
+                          << " path=" << media_path
+                          << std::endl;
+            }
+            continue;
+        }
+
+        const std::string file_type = IsAudioExtension(ext) ? "audio"
+                                  : (IsVideoExtension(ext) ? "video" : "file");
+        std::string file_key;
+        if (!im_service_->UploadFile(file_type, media_path, file_name, &file_key)) {
+            std::cerr << "[lark] failed to upload file"
+                      << " path=" << media_path
+                      << " file_type=" << file_type
+                      << std::endl;
+            continue;
+        }
+
+        bool sent = false;
+        if (file_type == "audio") {
+            sent = im_service_->SendAudioMessage(receive_id, file_key, receive_id_type);
+        } else {
+            sent = im_service_->SendFileMessage(receive_id, file_key, receive_id_type);
+        }
+        if (!sent) {
+            std::cerr << "[lark] failed to send file"
+                      << " receive_id=" << receive_id
+                      << " receive_id_type=" << receive_id_type
+                      << " file_type=" << file_type
+                      << " file_key=" << file_key
+                      << " path=" << media_path
+                      << std::endl;
+        }
     }
 }
 
