@@ -316,7 +316,7 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
                 std::chrono::seconds(240));
             if (!exec_result.timed_out && !exec_result.blocked && exec_result.exit_code == 0) {
                 std::error_code remove_ec;
-                audio_deleted = std::filesystem::remove(audio_path, remove_ec);
+                std::filesystem::remove(audio_path, remove_ec);
                 audio_path = opus_path.string();
             } else {
                 std::cerr << "[tts] opus convert failed: "

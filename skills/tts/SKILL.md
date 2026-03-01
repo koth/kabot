@@ -39,7 +39,7 @@ tts(text="今天天气很好", auto_play=true)
 
 指定输出路径：
 ```
-tts(text="播报一下", audio_path="/tmp/weather.mp3")
+tts(text="播报一下", audio_path="weather.opus")
 ```
 
 调速与音调：
