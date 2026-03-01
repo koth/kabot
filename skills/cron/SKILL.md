@@ -14,6 +14,14 @@ Use the `cron` tool to schedule reminders or recurring tasks.
 2. **Task** - message is a task description, agent executes and sends result
 3. **One-time** - runs once at a specific time, then auto-deletes
 
+### Mode Selection Rules (重要)
+
+- **默认是 Task**：除非用户明确说“提醒/提醒我/通知我/提醒我…”，否则按 Task 处理。
+- **Reminder 仅用于纯通知**：消息内容是“要说给用户听的一句话”，不需要执行任何动作。
+- **包含动作/查询/执行**（如：查天气/整理/生成/检查/统计/汇总/发邮件/拉数据/跑脚本）一律视为 Task。
+- **延迟提醒**必须显式设置 `mode="reminder"`；否则仍按 Task。
+- 用户既要“执行任务”又要“通知结果”，仍用 Task（不设置 reminder）。
+
 ## Examples
 
 
@@ -40,6 +48,11 @@ cron(action="add", message="Remind me about the meeting", at="<ISO datetime>")
 自然语言延迟提醒（不要立刻执行查询天气，只创建一次性任务）：
 ```
 cron(action="add", message="播放当前天气情况", at="<ISO datetime>")
+```
+
+自然语言延迟任务（需要执行动作/查询）：
+```
+cron(action="add", message="统计一下今天的订单数并发给我", at="<ISO datetime>")
 ```
 
 延迟发消息：
