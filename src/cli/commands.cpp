@@ -16,6 +16,7 @@
 #include "channels/channel_manager.hpp"
 #include "config/config_loader.hpp"
 #include "heartbeat/heartbeat_service.hpp"
+#include "session/session_manager.hpp"
 #include "providers/llm_provider.hpp"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
@@ -219,6 +220,8 @@ int RunGateway() {
 
     kabot::channels::ChannelManager channels(config, bus);
 
+    kabot::session::SessionManager sessions(config.agents.defaults.workspace);
+
     httplib::Server http_server;
     http_server.Get("/cron", [&heartbeat](const httplib::Request&, httplib::Response& res) {
         nlohmann::json json = nlohmann::json::array();
@@ -233,6 +236,62 @@ int RunGateway() {
                 {"state", BuildStateJson(job.state)},
                 {"delete_after_run", job.delete_after_run}
             });
+        }
+        res.set_content(json.dump(2), "application/json");
+    });
+
+    http_server.Get("/sessions", [&sessions](const httplib::Request&, httplib::Response& res) {
+        nlohmann::json json = nlohmann::json::array();
+        const auto list = sessions.ListSessions();
+        for (const auto& info : list) {
+            json.push_back({
+                {"id", info.key},
+                {"created_at", info.created_at},
+                {"updated_at", info.updated_at}
+            });
+        }
+        res.set_content(json.dump(2), "application/json");
+    });
+
+    http_server.Get(R"(/sessions/(.+))", [&sessions](const httplib::Request& req, httplib::Response& res) {
+        if (req.matches.size() < 2) {
+            res.status = 400;
+            res.set_content("missing session id", "text/plain");
+            return;
+        }
+        const auto session_id = httplib::detail::decode_url(req.matches[1], false);
+        const auto session = sessions.Get(session_id);
+        if (!session.has_value()) {
+            res.status = 404;
+            res.set_content("session not found", "text/plain");
+            return;
+        }
+        nlohmann::json json = nlohmann::json::object();
+        json["id"] = session->Key();
+        json["created_at"] = session->CreatedAt();
+        json["updated_at"] = session->UpdatedAt();
+        json["messages"] = nlohmann::json::array();
+        for (const auto& msg : session->Messages()) {
+            nlohmann::json entry = {
+                {"role", msg.role},
+                {"content", msg.content},
+                {"timestamp", msg.timestamp},
+                {"name", msg.name.empty() ? nlohmann::json(nullptr) : nlohmann::json(msg.name)},
+                {"tool_call_id", msg.tool_call_id.empty() ? nlohmann::json(nullptr) : nlohmann::json(msg.tool_call_id)},
+                {"tool_calls", nlohmann::json::array()}
+            };
+            for (const auto& call : msg.tool_calls) {
+                nlohmann::json args = nlohmann::json::object();
+                for (const auto& [key, value] : call.arguments) {
+                    args[key] = value;
+                }
+                entry["tool_calls"].push_back({
+                    {"id", call.id},
+                    {"name", call.name},
+                    {"arguments", std::move(args)}
+                });
+            }
+            json["messages"].push_back(std::move(entry));
         }
         res.set_content(json.dump(2), "application/json");
     });

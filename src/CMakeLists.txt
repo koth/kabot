@@ -85,6 +85,7 @@ endif()
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(CURL REQUIRED)
+find_package(SQLite3 REQUIRED)
 if(BOOST_ROOT AND NOT KABOT_USING_VCPKG)
   set(BOOST_ROOT ${BOOST_ROOT})
   set(BOOST_INCLUDEDIR ${BOOST_ROOT}/include)
@@ -143,6 +144,7 @@ target_link_libraries(kabot_core INTERFACE
   Boost::filesystem
   Boost::system
   Boost::process
+  SQLite::SQLite3
 )
 if(TARGET Boost::headers)
   target_link_libraries(kabot_core INTERFACE Boost::headers)

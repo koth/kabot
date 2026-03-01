@@ -2,12 +2,14 @@
 
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "providers/llm_provider.hpp"
 #include "nlohmann/json.hpp"
+#include "sqlite3.h"
 
 namespace kabot::session {
 
@@ -67,19 +69,23 @@ struct SessionInfo {
 class SessionManager {
 public:
     explicit SessionManager(std::string workspace);
+    ~SessionManager();
 
     Session GetOrCreate(const std::string& key);
+    std::optional<Session> Get(const std::string& key);
     void Save(const Session& session);
     bool Delete(const std::string& key);
     std::vector<SessionInfo> ListSessions() const;
 
 private:
     std::optional<Session> Load(const std::string& key) const;
-    std::filesystem::path SessionPath(const std::string& key) const;
-    static std::filesystem::path HomePath();
+    void EnsureSchema();
+    static bool Exec(sqlite3* db, const std::string& sql);
+    static std::string SafeText(const unsigned char* text);
 
     std::string workspace_;
-    std::filesystem::path sessions_dir_;
+    std::filesystem::path db_path_;
+    sqlite3* db_ = nullptr;
     std::unordered_map<std::string, Session> cache_;
     std::mutex mutex_;
 };
