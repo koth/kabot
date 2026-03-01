@@ -278,7 +278,13 @@ void CronService::LoadStore() {
                 store_.jobs.push_back(job);
             }
         }
+    } catch (const std::exception& ex) {
+        std::cerr << "[cron] load store failed path=" << store_path_.string()
+                  << " error=" << ex.what() << std::endl;
+        store_.jobs.clear();
     } catch (...) {
+        std::cerr << "[cron] load store failed path=" << store_path_.string()
+                  << " error=unknown" << std::endl;
         store_.jobs.clear();
     }
 }

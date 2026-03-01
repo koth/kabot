@@ -17,6 +17,8 @@
 #include "config/config_loader.hpp"
 #include "heartbeat/heartbeat_service.hpp"
 #include "providers/llm_provider.hpp"
+#include "httplib.h"
+#include "nlohmann/json.hpp"
 
 namespace {
 
@@ -31,6 +33,47 @@ std::filesystem::path GetHomePath() {
 
 std::filesystem::path GetPidFilePath() {
     return GetHomePath() / ".kabot" / "gateway.pid";
+}
+
+nlohmann::json BuildScheduleJson(const kabot::cron::CronSchedule& schedule) {
+    nlohmann::json json = nlohmann::json::object();
+    switch (schedule.kind) {
+        case kabot::cron::CronScheduleKind::At:
+            json["kind"] = "at";
+            break;
+        case kabot::cron::CronScheduleKind::Every:
+            json["kind"] = "every";
+            break;
+        case kabot::cron::CronScheduleKind::Cron:
+            json["kind"] = "cron";
+            break;
+    }
+    json["at_ms"] = schedule.at_ms.has_value() ? nlohmann::json(*schedule.at_ms) : nlohmann::json(nullptr);
+    json["every_ms"] = schedule.every_ms.has_value() ? nlohmann::json(*schedule.every_ms) : nlohmann::json(nullptr);
+    json["expr"] = schedule.expr.empty() ? nlohmann::json(nullptr) : nlohmann::json(schedule.expr);
+    json["tz"] = schedule.tz.empty() ? nlohmann::json(nullptr) : nlohmann::json(schedule.tz);
+    return json;
+}
+
+nlohmann::json BuildPayloadJson(const kabot::cron::CronPayload& payload) {
+    return {
+        {"kind", payload.kind},
+        {"message", payload.message},
+        {"deliver", payload.deliver},
+        {"channel", payload.channel.empty() ? nlohmann::json(nullptr) : nlohmann::json(payload.channel)},
+        {"to", payload.to.empty() ? nlohmann::json(nullptr) : nlohmann::json(payload.to)}
+    };
+}
+
+nlohmann::json BuildStateJson(const kabot::cron::CronJobState& state) {
+    nlohmann::json json = nlohmann::json::object();
+    json["next_run_at_ms"] = state.next_run_at_ms.has_value() ? nlohmann::json(*state.next_run_at_ms)
+                                                                : nlohmann::json(nullptr);
+    json["last_run_at_ms"] = state.last_run_at_ms.has_value() ? nlohmann::json(*state.last_run_at_ms)
+                                                                : nlohmann::json(nullptr);
+    json["last_status"] = state.last_status.empty() ? nlohmann::json(nullptr) : nlohmann::json(state.last_status);
+    json["last_error"] = state.last_error.empty() ? nlohmann::json(nullptr) : nlohmann::json(state.last_error);
+    return json;
 }
 
 bool IsProcessRunning(pid_t pid) {
@@ -176,6 +219,24 @@ int RunGateway() {
 
     kabot::channels::ChannelManager channels(config, bus);
 
+    httplib::Server http_server;
+    http_server.Get("/cron", [&heartbeat](const httplib::Request&, httplib::Response& res) {
+        nlohmann::json json = nlohmann::json::array();
+        const auto jobs = heartbeat.Cron().ListJobs(true);
+        for (const auto& job : jobs) {
+            json.push_back({
+                {"id", job.id},
+                {"name", job.name.empty() ? nlohmann::json(nullptr) : nlohmann::json(job.name)},
+                {"enabled", job.enabled},
+                {"schedule", BuildScheduleJson(job.schedule)},
+                {"payload", BuildPayloadJson(job.payload)},
+                {"state", BuildStateJson(job.state)},
+                {"delete_after_run", job.delete_after_run}
+            });
+        }
+        res.set_content(json.dump(2), "application/json");
+    });
+
     struct sigaction action {};
     action.sa_handler = HandleSignal;
     sigemptyset(&action.sa_mask);
@@ -185,6 +246,15 @@ int RunGateway() {
     sigaction(SIGHUP, &action, nullptr);
 
     std::thread agent_thread([&agent]() { agent.Run(); });
+    const std::string cron_http_host = config.heartbeat.cron_http_host;
+    const int cron_http_port = config.heartbeat.cron_http_port;
+    std::thread http_thread([&http_server, cron_http_host, cron_http_port]() {
+        const bool ok = http_server.listen(cron_http_host, cron_http_port);
+        if (!ok) {
+            std::cerr << "[cron] http server failed to listen on "
+                      << cron_http_host << ":" << cron_http_port << std::endl;
+        }
+    });
     channels.StartAll();
     heartbeat.Start();
 
@@ -208,6 +278,10 @@ int RunGateway() {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
+    http_server.stop();
+    if (http_thread.joinable()) {
+        http_thread.join();
+    }
     heartbeat.Stop();
     channels.StopAll();
     agent.Stop();

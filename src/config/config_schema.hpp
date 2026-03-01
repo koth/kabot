@@ -59,6 +59,8 @@ struct HeartbeatConfig {
     bool enabled = true;
     int interval_s = 30 * 60;
     std::string cron_store_path;
+    std::string cron_http_host = "0.0.0.0";
+    int cron_http_port = 8089;
 };
 
 struct QmdConfig {

@@ -166,6 +166,12 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         if (heartbeat.contains("cronStorePath") && heartbeat["cronStorePath"].is_string()) {
             config.heartbeat.cron_store_path = heartbeat["cronStorePath"].get<std::string>();
         }
+        if (heartbeat.contains("cronHttpHost") && heartbeat["cronHttpHost"].is_string()) {
+            config.heartbeat.cron_http_host = heartbeat["cronHttpHost"].get<std::string>();
+        }
+        if (heartbeat.contains("cronHttpPort") && heartbeat["cronHttpPort"].is_number_integer()) {
+            config.heartbeat.cron_http_port = heartbeat["cronHttpPort"].get<int>();
+        }
     }
 
     if (data.contains("qmd") && data["qmd"].is_object()) {
@@ -533,6 +539,22 @@ Config LoadConfig() {
         "KABOT_HEARTBEAT_CRON_STORE_PATH");
     if (!heartbeat_cron_store.empty()) {
         config.heartbeat.cron_store_path = heartbeat_cron_store;
+    }
+
+    const auto heartbeat_cron_http_host = GetEnvFallback(
+        "KABOT_HEARTBEAT__CRON_HTTP_HOST",
+        "KABOT_HEARTBEAT_CRON_HTTP_HOST");
+    if (!heartbeat_cron_http_host.empty()) {
+        config.heartbeat.cron_http_host = heartbeat_cron_http_host;
+    }
+
+    const auto heartbeat_cron_http_port = GetEnvFallback(
+        "KABOT_HEARTBEAT__CRON_HTTP_PORT",
+        "KABOT_HEARTBEAT_CRON_HTTP_PORT");
+    if (!heartbeat_cron_http_port.empty()) {
+        config.heartbeat.cron_http_port = ParseInt(
+            heartbeat_cron_http_port,
+            config.heartbeat.cron_http_port);
     }
 
     return config;
