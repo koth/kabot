@@ -46,6 +46,17 @@ std::string NormalizeCronExpr(const std::string& expr) {
     return expr;
 }
 
+std::string ReadStringOrEmpty(const nlohmann::json& object, const char* key) {
+    if (!object.contains(key)) {
+        return {};
+    }
+    const auto& value = object.at(key);
+    if (!value.is_string()) {
+        return {};
+    }
+    return value.get<std::string>();
+}
+
 std::string ScheduleKindToString(CronScheduleKind kind) {
     switch (kind) {
         case CronScheduleKind::At:
@@ -234,8 +245,8 @@ void CronService::LoadStore() {
         if (data.contains("jobs") && data["jobs"].is_array()) {
             for (const auto& item : data["jobs"]) {
                 CronJob job;
-                job.id = item.value("id", "");
-                job.name = item.value("name", "");
+                job.id = ReadStringOrEmpty(item, "id");
+                job.name = ReadStringOrEmpty(item, "name");
                 job.enabled = item.value("enabled", true);
                 job.created_at_ms = item.value("createdAtMs", 0LL);
                 job.updated_at_ms = item.value("updatedAtMs", 0LL);
@@ -250,17 +261,20 @@ void CronService::LoadStore() {
                     if (schedule.contains("everyMs") && schedule["everyMs"].is_number_integer()) {
                         job.schedule.every_ms = schedule["everyMs"].get<long long>();
                     }
-                    job.schedule.expr = schedule.value("expr", "");
-                    job.schedule.tz = schedule.value("tz", "");
+                    job.schedule.expr = ReadStringOrEmpty(schedule, "expr");
+                    job.schedule.tz = ReadStringOrEmpty(schedule, "tz");
                 }
 
                 if (item.contains("payload") && item["payload"].is_object()) {
                     const auto& payload = item["payload"];
-                    job.payload.kind = payload.value("kind", "agent_turn");
-                    job.payload.message = payload.value("message", "");
+                    job.payload.kind = ReadStringOrEmpty(payload, "kind");
+                    if (job.payload.kind.empty()) {
+                        job.payload.kind = "agent_turn";
+                    }
+                    job.payload.message = ReadStringOrEmpty(payload, "message");
                     job.payload.deliver = payload.value("deliver", false);
-                    job.payload.channel = payload.value("channel", "");
-                    job.payload.to = payload.value("to", "");
+                    job.payload.channel = ReadStringOrEmpty(payload, "channel");
+                    job.payload.to = ReadStringOrEmpty(payload, "to");
                 }
 
                 if (item.contains("state") && item["state"].is_object()) {
@@ -271,8 +285,8 @@ void CronService::LoadStore() {
                     if (state.contains("lastRunAtMs") && state["lastRunAtMs"].is_number_integer()) {
                         job.state.last_run_at_ms = state["lastRunAtMs"].get<long long>();
                     }
-                    job.state.last_status = state.value("lastStatus", "");
-                    job.state.last_error = state.value("lastError", "");
+                    job.state.last_status = ReadStringOrEmpty(state, "lastStatus");
+                    job.state.last_error = ReadStringOrEmpty(state, "lastError");
                 }
 
                 store_.jobs.push_back(job);
