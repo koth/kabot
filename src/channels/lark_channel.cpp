@@ -186,7 +186,8 @@ void LarkChannel::Send(const kabot::bus::OutboundMessage& msg) {
         const std::string file_type = IsAudioExtension(ext) ? "audio"
                                   : (IsVideoExtension(ext) ? "video" : "file");
         std::string file_key;
-        if (!im_service_->UploadFile(file_type, media_path, file_name, &file_key)) {
+        // set file type to ""
+        if (!im_service_->UploadFile("", media_path, file_name, &file_key)) {
             std::cerr << "[lark] failed to upload file"
                       << " path=" << media_path
                       << " file_type=" << file_type
