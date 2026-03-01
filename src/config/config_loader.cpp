@@ -77,6 +77,9 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
                 config.agents.defaults.max_tool_iterations = value;
                 config.agents.defaults.max_iterations = value;
             }
+            if (defaults.contains("maxHistoryMessages") && defaults["maxHistoryMessages"].is_number_integer()) {
+                config.agents.defaults.max_history_messages = defaults["maxHistoryMessages"].get<int>();
+            }
         }
     }
 
@@ -446,6 +449,15 @@ Config LoadConfig() {
         "KABOT_AGENT_TEMPERATURE");
     if (!temperature.empty()) {
         config.agents.defaults.temperature = ParseDouble(temperature, config.agents.defaults.temperature);
+    }
+
+    const auto max_history_messages = GetEnvFallback(
+        "KABOT_AGENTS__DEFAULTS__MAX_HISTORY_MESSAGES",
+        "KABOT_AGENT_MAX_HISTORY_MESSAGES");
+    if (!max_history_messages.empty()) {
+        config.agents.defaults.max_history_messages = ParseInt(
+            max_history_messages,
+            config.agents.defaults.max_history_messages);
     }
 
     const auto qmd_enabled = GetEnvFallback(

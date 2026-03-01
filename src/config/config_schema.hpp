@@ -49,6 +49,7 @@ struct AgentDefaults {
     int max_tokens = 8192;
     double temperature = 0.7;
     int max_tool_iterations = 20;
+    int max_history_messages = 50;
 };
 
 struct AgentsConfig {

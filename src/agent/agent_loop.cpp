@@ -181,7 +181,7 @@ void AgentLoop::Stop() {
 std::string AgentLoop::ProcessDirect(const std::string& content, const std::string& session_key) {
     std::lock_guard<std::mutex> guard(process_mutex_);
     auto session = sessions_.GetOrCreate(session_key);
-    auto history = session.GetHistory();
+    auto history = session.GetHistory(static_cast<std::size_t>(config_.max_history_messages));
     auto messages = context_.BuildMessages(history, content, {});
 
     int iteration = 0;
@@ -275,7 +275,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
     }
     auto session = sessions_.GetOrCreate(msg.SessionKey());
 
-    auto history = session.GetHistory();
+    auto history = session.GetHistory(static_cast<std::size_t>(config_.max_history_messages));
     auto messages = context_.BuildMessages(
         history,
         content,
