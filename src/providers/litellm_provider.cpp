@@ -12,6 +12,9 @@
 
 namespace kabot::providers {
 namespace {
+std::string HttpLibErrorToString(httplib::Error err) {
+    return httplib::to_string(err);
+}
 
 struct ParsedUrl {
     bool https = true;
@@ -399,7 +402,14 @@ LLMResponse LiteLLMProvider::Chat(
 
         auto response = client->Post(endpoint.c_str(), headers, payload.dump(), "application/json");
         if (!response) {
-            return LLMResponse{.content = "Error calling LLM: request failed", .finish_reason = "error"};
+            const auto err = response.error();
+            const auto err_text = HttpLibErrorToString(err);
+            std::cerr << "[llm] request failed: httplib error=" << static_cast<int>(err)
+                      << "(" << err_text << ")" << std::endl;
+            return LLMResponse{
+                .content = "Error calling LLM: request failed (httplib error=" + std::to_string(static_cast<int>(err)) +
+                    ", " + err_text + ")",
+                .finish_reason = "error"};
         }
         if (response->status >= 400) {
             std::cerr << "[llm] HTTP " << response->status
