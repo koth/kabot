@@ -79,6 +79,7 @@ def cmd_dump(args: argparse.Namespace) -> None:
     data = load_json(args.input)
     exclude = {"淘宝", "京东", "天猫", "电影榜","Behance","App Store","少数派","先知社区","即刻圈子","懂球帝","NBA论坛热帖","新浪体育新闻","音乐榜","Apple Music","历史上的今天","今日热卖"}
     lines: List[str] = []
+    board_count = 0
     for item in data:
         board_name = item.get("board", "")
         if any(keyword in board_name for keyword in exclude):
@@ -88,12 +89,15 @@ def cmd_dump(args: argparse.Namespace) -> None:
             continue
         if board_name:
             lines.append(board_name)
+            board_count += 1
         for idx, entry in enumerate(items, 1):
             title = entry.get("title", "")
             if title:
                 lines.append(f"{idx}. {title}")
         if lines and lines[-1] != "":
             lines.append("")
+        if board_count >= 10:
+            break
     content = "\n".join(lines).rstrip() + "\n"
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(content)
