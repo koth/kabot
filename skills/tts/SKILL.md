@@ -32,7 +32,7 @@ Use the `tts` tool to synthesize speech and save it to an audio file, with optio
 tts(text="你好，欢迎使用语音合成", voice="zh-CN-XiaoyiNeural")
 ```
 
-合成/path/to/article.txt的文件内容：
+合成/path/to/article.txt的文件内容(注意不要指定audio_path)：
 ```
 tts(file="/path/to/article.txt")
 ```
