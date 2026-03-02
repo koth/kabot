@@ -75,6 +75,30 @@ def cmd_show(args: argparse.Namespace) -> None:
             print(json.dumps(item, ensure_ascii=False, indent=2))
 
 
+def cmd_dump(args: argparse.Namespace) -> None:
+    data = load_json(args.input)
+    exclude = {"淘宝", "京东", "天猫", "电影榜","Behance","App Store","少数派","先知社区","即刻圈子","懂球帝","NBA论坛热帖","新浪体育新闻","音乐榜","Apple Music","历史上的今天","今日热卖"}
+    lines: List[str] = []
+    for item in data:
+        board_name = item.get("board", "")
+        if any(keyword in board_name for keyword in exclude):
+            continue
+        items = item.get("items", [])
+        if not items:
+            continue
+        if board_name:
+            lines.append(board_name)
+        for idx, entry in enumerate(items, 1):
+            title = entry.get("title", "")
+            if title:
+                lines.append(f"{idx}. {title}")
+        if lines and lines[-1] != "":
+            lines.append("")
+    content = "\n".join(lines).rstrip() + "\n"
+    with open(args.output, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
 def main() -> None:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     default_json = os.path.join(base_dir, "tophub.json")
@@ -95,6 +119,12 @@ def main() -> None:
     p_show.add_argument("board", help="榜单名正则")
     p_show.add_argument("-i", "--input", default=default_json, help="tophub.json 路径")
     p_show.set_defaults(func=cmd_show)
+
+    p_dump = sub.add_parser("dump", help="导出热门榜单与条目到文本")
+    p_dump.add_argument("-i", "--input", default=default_json, help="tophub.json 路径")
+    p_dump.add_argument("-o", "--output", default=os.path.join(base_dir, "hotnews.txt"),
+                        help="输出文本路径")
+    p_dump.set_defaults(func=cmd_dump)
 
     args = parser.parse_args()
     args.func(args)
