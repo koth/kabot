@@ -147,13 +147,23 @@ EdgeTtsTool::EdgeTtsTool(std::string workspace)
     : workspace_(std::move(workspace)) {}
 
 std::string EdgeTtsTool::ParametersJson() const {
-    return R"({"type":"object","properties":{"text":{"type":"string"},"voice":{"type":"string"},"lang":{"type":"string"},"output_format":{"type":"string"},"rate":{"type":"string"},"pitch":{"type":"string"},"volume":{"type":"string"},"save_subtitles":{"type":"boolean"},"audio_path":{"type":"string"},"auto_play":{"type":"boolean"},"timeout_ms":{"type":"integer"}},"required":["text"]})";
+    return R"({"type":"object","properties":{"text":{"type":"string"},"file":{"type":"string","description":"local text file path"},"voice":{"type":"string"},"lang":{"type":"string"},"output_format":{"type":"string"},"rate":{"type":"string"},"pitch":{"type":"string"},"volume":{"type":"string"},"save_subtitles":{"type":"boolean"},"audio_path":{"type":"string"},"auto_play":{"type":"boolean"},"timeout_ms":{"type":"integer"}},"required":[]})";
 }
 
 std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::string>& params) {
-    const auto text = GetParam(params, "text");
+    auto text = GetParam(params, "text");
+    const auto file_path = GetParam(params, "file");
+    if (!file_path.empty()) {
+        std::ifstream input(file_path);
+        if (!input.is_open()) {
+            return "Error: failed to open file";
+        }
+        std::ostringstream buffer;
+        buffer << input.rdbuf();
+        text = buffer.str();
+    }
     if (text.empty()) {
-        return "Error: text is required";
+        return "Error: text or file is required";
     }
     const auto voice = GetParam(params, "voice").empty() ? "zh-CN-XiaoyiNeural" : GetParam(params, "voice");
     const auto lang = GetParam(params, "lang").empty() ? "zh-CN" : GetParam(params, "lang");
