@@ -69,6 +69,12 @@ FetchContent_Declare(
   GIT_TAG master
 )
 
+FetchContent_Declare(
+  spdlog
+  GIT_REPOSITORY https://github.com/gabime/spdlog.git
+  GIT_TAG v1.13.0
+)
+
 if(KABOT_ENABLE_LARK)
   FetchContent_Declare(
     lark_cpp
@@ -77,7 +83,7 @@ if(KABOT_ENABLE_LARK)
   )
 endif()
 
-FetchContent_MakeAvailable(nlohmann_json httplib croncpp)
+FetchContent_MakeAvailable(nlohmann_json httplib croncpp spdlog)
 if(KABOT_ENABLE_LARK)
   FetchContent_MakeAvailable(lark_cpp)
 endif()
@@ -137,6 +143,7 @@ target_include_directories(kabot_core INTERFACE ${croncpp_SOURCE_DIR}/include)
 target_link_libraries(kabot_core INTERFACE 
   httplib::httplib 
   nlohmann_json::nlohmann_json 
+  spdlog::spdlog
   OpenSSL::SSL 
   OpenSSL::Crypto
   CURL::libcurl
@@ -188,6 +195,7 @@ set(KABOT_SOURCES
   cron/cron_service.cpp
   heartbeat/heartbeat_service.cpp
   session/session_manager.cpp
+  utils/logging.cpp
 )
 
 if(KABOT_ENABLE_TELEGRAM)

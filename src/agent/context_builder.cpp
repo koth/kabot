@@ -4,12 +4,12 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
-#include <iostream>
 #include <sstream>
 #include <vector>
 #include <utility>
 
 #include "sandbox/sandbox_executor.hpp"
+#include "utils/logging.hpp"
 
 namespace kabot::agent {
 
@@ -47,16 +47,16 @@ std::string ContextBuilder::BuildSystemPrompt(
 
     std::string memory;
     if (qmd_.enabled) {
-        std::cerr << "[context] memory=QMD" << std::endl;
+        LOG_DEBUG("[context] memory=QMD");
         if (!current_message.empty()) {
-            std::cerr << "[context] qmd_query=" << current_message << std::endl;
+            LOG_DEBUG("[context] qmd_query={}", current_message);
             memory = BuildQmdContext(current_message);
             if (!memory.empty() && false) {
-                std::cerr << "[context] qmd_memory\n" << memory << std::endl;
+                LOG_DEBUG("[context] qmd_memory\n{}", memory);
             }
         }
     } else {
-        std::cerr << "[context] memory=FULL" << std::endl;
+        LOG_DEBUG("[context] memory=FULL");
         memory = memory_.GetMemoryContext();
     }
     if (!memory.empty()) {
@@ -195,13 +195,13 @@ std::string ContextBuilder::BuildQmdContext(const std::string& query) const {
         cmd.str(),
         workspace_,
         std::chrono::seconds(qmd_.timeout_s));
-    std::cerr << "[context] qmd_cmd=" << cmd.str() << std::endl;
+    LOG_DEBUG("[context] qmd_cmd={}", cmd.str());
     if (result.timed_out || result.exit_code != 0) {
-        std::cerr << "[context] qmd_failed exit=" << result.exit_code
-                  << " timeout=" << (result.timed_out ? "true" : "false")
-                  << std::endl;
+        LOG_WARN("[context] qmd_failed exit={} timeout={}",
+                 result.exit_code,
+                 (result.timed_out ? "true" : "false"));
         if (!result.error.empty()) {
-            std::cerr << "[context] qmd_error\n" << result.error << std::endl;
+            LOG_WARN("[context] qmd_error\n{}", result.error);
         }
         return {};
     }

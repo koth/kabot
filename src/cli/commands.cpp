@@ -20,6 +20,7 @@
 #include "providers/llm_provider.hpp"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
+#include "utils/logging.hpp"
 
 namespace {
 
@@ -136,21 +137,26 @@ void HandleSignal(int signal) {
 
 int RunGateway() {
     auto config = kabot::config::LoadConfig();
+    kabot::utils::LogConfig log_config;
+    log_config.min_level = kabot::utils::ParseLogLevel(config.logging.level);
+    log_config.log_file = config.logging.log_file;
+    log_config.enable_stdout = config.logging.enable_stdout;
+    kabot::utils::InitLogging(log_config);
     auto provider = kabot::providers::CreateProvider(config);
     if (!provider) {
-        std::cout << "Failed to create provider." << std::endl;
+        LOG_ERROR("Failed to create provider.");
         return 1;
     }
 
     const auto existing_pid = ReadPidFile();
     if (existing_pid && IsProcessRunning(*existing_pid)) {
-        std::cout << "kabot gateway already running (pid=" << *existing_pid << ")" << std::endl;
+        LOG_WARN("kabot gateway already running (pid={})", *existing_pid);
         return 1;
     }
     RemovePidFile();
 
     if (!WritePidFile(::getpid())) {
-        std::cout << "Failed to write gateway pid file." << std::endl;
+        LOG_ERROR("Failed to write gateway pid file.");
         return 1;
     }
 
@@ -194,10 +200,11 @@ int RunGateway() {
         return agent.ProcessDirect(prompt, "heartbeat");
     };
     on_cron = [&agent, &bus](const kabot::cron::CronJob& job) {
-        std::cout << "[cron] job payload deliver=" << (job.payload.deliver ? "true" : "false")
-                  << " channel=" << (job.payload.channel.empty() ? "(empty)" : job.payload.channel)
-                  << " to=" << (job.payload.to.empty() ? "(empty)" : job.payload.to)
-                  << " message=" << job.payload.message << std::endl;
+        LOG_INFO("[cron] job payload deliver={} channel={} to={} message={}",
+                 (job.payload.deliver ? "true" : "false"),
+                 (job.payload.channel.empty() ? "(empty)" : job.payload.channel),
+                 (job.payload.to.empty() ? "(empty)" : job.payload.to),
+                 job.payload.message);
         if (job.payload.deliver) {
             kabot::bus::OutboundMessage outbound{};
             outbound.channel = job.payload.channel.empty() ? "lark" : job.payload.channel;
@@ -310,14 +317,13 @@ int RunGateway() {
     std::thread http_thread([&http_server, cron_http_host, cron_http_port]() {
         const bool ok = http_server.listen(cron_http_host, cron_http_port);
         if (!ok) {
-            std::cerr << "[cron] http server failed to listen on "
-                      << cron_http_host << ":" << cron_http_port << std::endl;
+            LOG_ERROR("[cron] http server failed to listen on {}:{}", cron_http_host, cron_http_port);
         }
     });
     channels.StartAll();
     heartbeat.Start();
 
-    std::cout << "kabot gateway started. Press Ctrl+C to stop." << std::endl;
+    LOG_INFO("kabot gateway started. Press Ctrl+C to stop.");
     bool shutdown_guard_started = false;
     bool restart_requested = false;
     while (g_running.load()) {
@@ -351,7 +357,7 @@ int RunGateway() {
     if (restart_requested && g_argv0) {
         const char* args[] = {g_argv0, "gateway", nullptr};
         ::execv(g_argv0, const_cast<char* const*>(args));
-        std::cout << "Failed to restart gateway." << std::endl;
+        LOG_ERROR("Failed to restart gateway.");
         return 1;
     }
     return 0;
@@ -367,14 +373,14 @@ int RestartGateway(const char* argv0) {
 
     const char* args[] = {argv0, "gateway", nullptr};
     ::execv(argv0, const_cast<char* const*>(args));
-    std::cout << "Failed to restart gateway." << std::endl;
+    LOG_ERROR("Failed to restart gateway.");
     return 1;
 }
 
 int HupGateway() {
     const auto pid = ReadPidFile();
     if (!pid || !IsProcessRunning(*pid)) {
-        std::cout << "kabot gateway not running." << std::endl;
+        LOG_WARN("kabot gateway not running.");
         return 1;
     }
     ::kill(*pid, SIGHUP);
@@ -398,13 +404,18 @@ int main(int argc, char** argv) {
     }
 
     if (argc < 2) {
-        std::cout << "Usage: kabot_cli gateway | kabot_cli restart | kabot_cli hup | kabot_cli \"message\"" << std::endl;
+        LOG_INFO("Usage: kabot_cli gateway | kabot_cli restart | kabot_cli hup | kabot_cli \"message\"");
         return 1;
     }
 
     std::string message = argv[1];
 
     auto config = kabot::config::LoadConfig();
+    kabot::utils::LogConfig log_config;
+    log_config.min_level = kabot::utils::ParseLogLevel(config.logging.level);
+    log_config.log_file = config.logging.log_file;
+    log_config.enable_stdout = config.logging.enable_stdout;
+    kabot::utils::InitLogging(log_config);
     auto provider = kabot::providers::CreateProvider(config);
 
     std::vector<kabot::providers::Message> messages;
@@ -421,10 +432,10 @@ int main(int argc, char** argv) {
         config.agents.defaults.temperature);
 
     if (response.content.empty()) {
-        std::cout << "[empty response]" << std::endl;
+        LOG_INFO("[empty response]");
         return 0;
     }
 
-    std::cout << response.content << std::endl;
+    LOG_INFO("{}", response.content);
     return 0;
 }

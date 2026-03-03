@@ -40,5 +40,10 @@
     "enabled": true,
     "intervalS": 1800,
     "cronStorePath": "/Users/kothchen/.kabot/cron/jobs.json"
+  },
+  "logging": {
+    "level": "info",
+    "logFile": "/Users/kothchen/.kabot/logs/kabot.log",
+    "enableStdout": true
   }
 }

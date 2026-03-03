@@ -1,8 +1,9 @@
 #include "channels/channel_base.hpp"
 
 #include <algorithm>
-#include <iostream>
 #include <sstream>
+
+#include "utils/logging.hpp"
 
 namespace kabot::channels {
 
@@ -40,7 +41,7 @@ void ChannelBase::HandleMessage(
     const std::vector<std::string>& media,
     const std::unordered_map<std::string, std::string>& metadata) {
     if (!IsAllowed(sender_id) && !IsAllowed(chat_id)) {
-        std::cerr << "[channel] message blocked by allow_from: " << sender_id << " or " << chat_id << std::endl;
+        LOG_WARN("[channel] message blocked by allow_from: {} or {}", sender_id, chat_id);
         return;
     }
     kabot::bus::InboundMessage msg{};

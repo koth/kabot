@@ -4,7 +4,6 @@
 #include <chrono>
 #include <fstream>
 #include <limits>
-#include <iostream>
 #include <random>
 #include <utility>
 #include <sstream>
@@ -12,6 +11,7 @@
 #include "croncpp.h"
 
 #include "nlohmann/json.hpp"
+#include "utils/logging.hpp"
 
 namespace kabot::cron {
 namespace {
@@ -293,12 +293,10 @@ void CronService::LoadStore() {
             }
         }
     } catch (const std::exception& ex) {
-        std::cerr << "[cron] load store failed path=" << store_path_.string()
-                  << " error=" << ex.what() << std::endl;
+        LOG_ERROR("[cron] load store failed path={} error={}", store_path_.string(), ex.what());
         store_.jobs.clear();
     } catch (...) {
-        std::cerr << "[cron] load store failed path=" << store_path_.string()
-                  << " error=unknown" << std::endl;
+        LOG_ERROR("[cron] load store failed path={} error=unknown", store_path_.string());
         store_.jobs.clear();
     }
 }
@@ -436,12 +434,12 @@ std::optional<long long> CronService::ComputeNextRun(const CronSchedule& schedul
         if (schedule.at_ms.has_value() && schedule.at_ms.value() > now_ms) {
             return schedule.at_ms;
         }
-        std::cerr << "[cron] compute next run failed: at schedule is in the past or missing" << std::endl;
+        LOG_ERROR("[cron] compute next run failed: at schedule is in the past or missing");
         return std::nullopt;
     }
     if (schedule.kind == CronScheduleKind::Every) {
         if (!schedule.every_ms.has_value() || schedule.every_ms.value() <= 0) {
-            std::cerr << "[cron] compute next run failed: invalid every_ms" << std::endl;
+            LOG_ERROR("[cron] compute next run failed: invalid every_ms");
             return std::nullopt;
         }
         return now_ms + schedule.every_ms.value();
@@ -455,16 +453,16 @@ std::optional<long long> CronService::ComputeNextRun(const CronSchedule& schedul
                 next_tp.time_since_epoch()).count();
             return next_ms;
         } catch (const std::exception& ex) {
-            std::cerr << "[cron] compute next run failed: invalid cron expr '" << schedule.expr
-                      << "' error=" << ex.what() << std::endl;
+            LOG_ERROR("[cron] compute next run failed: invalid cron expr '{}' error={}",
+                      schedule.expr,
+                      ex.what());
             return std::nullopt;
         } catch (...) {
-            std::cerr << "[cron] compute next run failed: invalid cron expr '" << schedule.expr
-                      << "'" << std::endl;
+            LOG_ERROR("[cron] compute next run failed: invalid cron expr '{}'", schedule.expr);
             return std::nullopt;
         }
     }
-    std::cerr << "[cron] compute next run failed: invalid schedule kind or empty expr" << std::endl;
+    LOG_ERROR("[cron] compute next run failed: invalid schedule kind or empty expr");
     return std::nullopt;
 }
 

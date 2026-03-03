@@ -1,15 +1,16 @@
 #include "channels/lark_channel.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <filesystem>
-#include <iostream>
 
 #include <nlohmann/json.hpp>
 
 #include "lark/im/v1/im_service.h"
 #include "lark/im/v1/model.h"
 #include "lark/ws/event_dispatcher.h"
+#include "utils/logging.hpp"
 
 // lark_cpp 的 WsClient::Stop 是私有接口，这里通过宏打开访问以便安全停止线程。
 #define private public
@@ -66,7 +67,7 @@ void LarkChannel::Start() {
         return;
     }
     if (config_.app_id.empty() || config_.app_secret.empty()) {
-        std::cerr << "[lark] app_id or app_secret is empty; channel disabled" << std::endl;
+        LOG_ERROR("[lark] app_id or app_secret is empty; channel disabled");
         running_ = false;
         return;
     }
@@ -86,8 +87,14 @@ void LarkChannel::Start() {
 
     running_ = true;
     ws_thread_ = std::make_unique<std::thread>([this]() {
-        if (ws_client_) {
-            ws_client_->Start();
+        while (running_) {
+            if (ws_client_) {
+                ws_client_->Start();
+            }
+            if (!running_) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(5));
         }
     });
 }
@@ -147,12 +154,11 @@ void LarkChannel::Send(const kabot::bus::OutboundMessage& msg) {
         body["text"] = msg.content;
 
         if (!im_service_->CreateMessage(receive_id, msg_type, body.dump(), receive_id_type)) {
-            std::cerr << "[lark] failed to send message"
-                      << " receive_id=" << receive_id
-                      << " receive_id_type=" << receive_id_type
-                      << " msg_type=" << msg_type
-                      << " content=[" << msg.content << "]"
-                      << std::endl;
+            LOG_ERROR("[lark] failed to send message receive_id={} receive_id_type={} msg_type={} content=[{}]",
+                      receive_id,
+                      receive_id_type,
+                      msg_type,
+                      msg.content);
         }
     }
 
@@ -165,20 +171,17 @@ void LarkChannel::Send(const kabot::bus::OutboundMessage& msg) {
         if (IsImageExtension(ext)) {
             std::string image_key;
             if (!im_service_->UploadImage(media_path, &image_key)) {
-                std::cerr << "[lark] failed to upload image"
-                          << " path=" << media_path
-                          << std::endl;
+                LOG_ERROR("[lark] failed to upload image path={}", media_path);
                 continue;
             }
             nlohmann::json content;
             content["image_key"] = image_key;
             if (!im_service_->CreateMessage(receive_id, "image", content.dump(), receive_id_type)) {
-                std::cerr << "[lark] failed to send image"
-                          << " receive_id=" << receive_id
-                          << " receive_id_type=" << receive_id_type
-                          << " image_key=" << image_key
-                          << " path=" << media_path
-                          << std::endl;
+                LOG_ERROR("[lark] failed to send image receive_id={} receive_id_type={} image_key={} path={}",
+                          receive_id,
+                          receive_id_type,
+                          image_key,
+                          media_path);
             }
             continue;
         }
@@ -188,10 +191,9 @@ void LarkChannel::Send(const kabot::bus::OutboundMessage& msg) {
         std::string file_key;
         // set file type to ""
         if (!im_service_->UploadFile("", media_path, file_name, &file_key)) {
-            std::cerr << "[lark] failed to upload file"
-                      << " path=" << media_path
-                      << " file_type=" << file_type
-                      << std::endl;
+            LOG_ERROR("[lark] failed to upload file path={} file_type={}",
+                      media_path,
+                      file_type);
             continue;
         }
 
@@ -202,13 +204,12 @@ void LarkChannel::Send(const kabot::bus::OutboundMessage& msg) {
             sent = im_service_->SendFileMessage(receive_id, file_key, receive_id_type);
         }
         if (!sent) {
-            std::cerr << "[lark] failed to send file"
-                      << " receive_id=" << receive_id
-                      << " receive_id_type=" << receive_id_type
-                      << " file_type=" << file_type
-                      << " file_key=" << file_key
-                      << " path=" << media_path
-                      << std::endl;
+            LOG_ERROR("[lark] failed to send file receive_id={} receive_id_type={} file_type={} file_key={} path={}",
+                      receive_id,
+                      receive_id_type,
+                      file_type,
+                      file_key,
+                      media_path);
         }
     }
 }

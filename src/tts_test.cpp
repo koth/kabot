@@ -1,9 +1,10 @@
 #include "agent/tools/tts.hpp"
 
 #include <filesystem>
-#include <iostream>
 #include <string>
 #include <unordered_map>
+
+#include "utils/logging.hpp"
 
 int main(int argc, char** argv) {
     std::string text = argc > 1 ? argv[1] : "测试你妹啊测试";
@@ -21,6 +22,6 @@ int main(int argc, char** argv) {
     }
 
     const auto result = tool.Execute(params);
-    std::cout << result << std::endl;
+    LOG_INFO("{}", result);
     return 0;
 }

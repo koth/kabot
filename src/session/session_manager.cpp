@@ -4,7 +4,8 @@
 #include <sstream>
 #include <chrono>
 #include <iomanip>
-#include <iostream>
+
+#include "utils/logging.hpp"
 
 namespace kabot::session {
 namespace {
@@ -346,7 +347,7 @@ void SessionManager::EnsureSchema() {
         return;
     }
     if (sqlite3_open(db_path_.string().c_str(), &db_) != SQLITE_OK) {
-        std::cerr << "[session] failed to open sqlite db: " << db_path_ << std::endl;
+        LOG_ERROR("[session] failed to open sqlite db: {}", db_path_.string());
         sqlite3_close(db_);
         db_ = nullptr;
         return;
@@ -376,7 +377,7 @@ bool SessionManager::Exec(sqlite3* db, const std::string& sql) {
     const auto rc = sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &err);
     if (rc != SQLITE_OK) {
         if (err) {
-            std::cerr << "[session] sqlite exec error: " << err << std::endl;
+            LOG_ERROR("[session] sqlite exec error: {}", err);
             sqlite3_free(err);
         }
         return false;

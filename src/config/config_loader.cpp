@@ -208,6 +208,19 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         }
     }
 
+    if (data.contains("logging") && data["logging"].is_object()) {
+        const auto& logging = data["logging"];
+        if (logging.contains("level") && logging["level"].is_string()) {
+            config.logging.level = logging["level"].get<std::string>();
+        }
+        if (logging.contains("logFile") && logging["logFile"].is_string()) {
+            config.logging.log_file = logging["logFile"].get<std::string>();
+        }
+        if (logging.contains("enableStdout") && logging["enableStdout"].is_boolean()) {
+            config.logging.enable_stdout = logging["enableStdout"].get<bool>();
+        }
+    }
+
     if (data.contains("tools") && data["tools"].is_object()) {
         const auto& tools = data["tools"];
         if (tools.contains("web") && tools["web"].is_object()) {

@@ -1,7 +1,7 @@
 #include "agent/tools/shell.hpp"
 
-#include <iostream>
 #include "sandbox/sandbox_executor.hpp"
+#include "utils/logging.hpp"
 
 namespace kabot::agent::tools {
 
@@ -26,17 +26,17 @@ std::string ExecTool::Execute(const std::unordered_map<std::string, std::string>
         return "Error: command timed out";
     }
     if (!result.output.empty()) {
-        std::cerr << "[exec] stdout\n" << result.output << std::endl;
+        LOG_INFO("[exec] stdout\n{}", result.output);
     }
     if (!result.error.empty()) {
-        std::cerr << "[exec] stderr\n" << result.error << std::endl;
+        LOG_WARN("[exec] stderr\n{}", result.error);
     }
     if (result.exit_code == 0) {
-        std::cerr << "[exec] exit code 0" << std::endl;
+        LOG_DEBUG("[exec] exit code 0");
         return result.output.empty() ? "(no output)" : result.output;
     }
     if (!result.error.empty()) {
-        std::cerr << "[exec] exit code " << result.exit_code << std::endl;
+        LOG_WARN("[exec] exit code {}", result.exit_code);
         return "[stderr]\n" + result.error +
                (result.output.empty() ? "" : "\n[stdout]\n" + result.output);
     }

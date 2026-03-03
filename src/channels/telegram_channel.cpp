@@ -3,10 +3,11 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
-#include <iostream>
 #include <regex>
 #include <vector>
 #include <tgbot/net/CurlHttpClient.h>
+
+#include "utils/logging.hpp"
 
 namespace kabot::channels {
 
@@ -54,7 +55,7 @@ void TelegramChannel::Start() {
         return;
     }
     if (config_.token.empty()) {
-        std::cerr << "[telegram] token is empty; channel disabled" << std::endl;
+        LOG_ERROR("[telegram] token is empty; channel disabled");
         running_ = false;
         return;
     }
@@ -67,14 +68,14 @@ void TelegramChannel::Start() {
 #ifdef HAVE_CURL
         http_client_ = std::make_unique<TgBot::CurlHttpClient>();
         bot_ = std::make_unique<TgBot::Bot>(config_.token, *http_client_);
-        std::cerr << "[telegram] bot initialized with CurlHttpClient (proxy-aware)" << std::endl;
+        LOG_INFO("[telegram] bot initialized with CurlHttpClient (proxy-aware)");
 #else
         bot_ = std::make_unique<TgBot::Bot>(config_.token);
-        std::cerr << "[telegram] curl not available, fallback to BoostHttpOnlySslClient" << std::endl;
+        LOG_WARN("[telegram] curl not available, fallback to BoostHttpOnlySslClient");
 #endif
     } else {
         bot_ = std::make_unique<TgBot::Bot>(config_.token);
-        std::cerr << "[telegram] bot initialized with BoostHttpOnlySslClient" << std::endl;
+        LOG_INFO("[telegram] bot initialized with BoostHttpOnlySslClient");
     }
     bot_->getEvents().onCommand("start", [this](TgBot::Message::Ptr message) {
         if (!message || !message->from) {
@@ -106,8 +107,7 @@ void TelegramChannel::Start() {
         if (!message->from->username.empty()) {
             sender_id += "|" + message->from->username;
         }
-        std::cerr << "[telegram] received message from " << sender_id
-                  << " in chat " << chat_id << std::endl;
+        LOG_INFO("[telegram] received message from {} in chat {}", sender_id, chat_id);
         std::string media_type;
         std::string mime_type;
         std::string media_id;
@@ -167,10 +167,10 @@ void TelegramChannel::Start() {
             try {
                 long_poll_->start();
             } catch (const TgBot::TgException& ex) {
-                std::cerr << "[telegram] long poll error: " << ex.what() << std::endl;
+                LOG_ERROR("[telegram] long poll error: {}", ex.what());
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             } catch (const std::exception& ex) {
-                std::cerr << "[telegram] long poll error: " << ex.what() << std::endl;
+                LOG_ERROR("[telegram] long poll error: {}", ex.what());
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             }
         }

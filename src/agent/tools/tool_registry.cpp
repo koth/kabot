@@ -1,6 +1,6 @@
 #include "agent/tools/tool_registry.hpp"
 
-#include <iostream>
+#include "utils/logging.hpp"
 
 namespace kabot::agent::tools {
 
@@ -40,22 +40,24 @@ std::string ToolRegistry::Execute(
     if (!tool) {
         return "Error: Tool '" + name + "' not found";
     }
-    std::cerr << "[tool] start name=" << name;
+    std::string param_dump;
     if (!params.empty()) {
-        std::cerr << " params={";
         bool first = true;
         for (const auto& [key, value] : params) {
             if (!first) {
-                std::cerr << ", ";
+                param_dump += ", ";
             }
-            std::cerr << key << "=" << value;
+            param_dump += key + "=" + value;
             first = false;
         }
-        std::cerr << "}";
     }
-    std::cerr << std::endl;
+    if (param_dump.empty()) {
+        LOG_DEBUG("[tool] start name={}", name);
+    } else {
+        LOG_DEBUG("[tool] start name={} params={{{}}}", name, param_dump);
+    }
     const auto result = tool->Execute(params);
-    std::cerr << "[tool] end name=" << name << " size=" << result.size() << std::endl;
+    LOG_DEBUG("[tool] end name={} size={}", name, result.size());
     return result;
 }
 

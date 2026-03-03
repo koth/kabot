@@ -76,12 +76,19 @@ struct QmdConfig {
     bool update_embeddings = false;
 };
 
+struct LoggingConfig {
+    std::string level = "info";
+    std::string log_file;
+    bool enable_stdout = true;
+};
+
 struct Config {
     AgentsConfig agents;
     ChannelsConfig channels;
     HeartbeatConfig heartbeat;
     ProvidersConfig providers;
     QmdConfig qmd;
+    LoggingConfig logging;
 };
 
 }  // namespace kabot::config

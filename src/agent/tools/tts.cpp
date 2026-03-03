@@ -8,7 +8,6 @@
 #include <ctime>
 #include <fstream>
 #include <iomanip>
-#include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
@@ -30,6 +29,7 @@
 
 #include "nlohmann/json.hpp"
 #include "sandbox/sandbox_executor.hpp"
+#include "utils/logging.hpp"
 
 namespace kabot::agent::tools {
 namespace {
@@ -329,9 +329,8 @@ std::string EdgeTtsTool::Execute(const std::unordered_map<std::string, std::stri
                 std::filesystem::remove(audio_path, remove_ec);
                 audio_path = opus_path.string();
             } else {
-                std::cerr << "[tts] opus convert failed: "
-                          << (exec_result.error.empty() ? "unknown" : exec_result.error)
-                          << std::endl;
+                LOG_WARN("[tts] opus convert failed: {}",
+                         exec_result.error.empty() ? "unknown" : exec_result.error);
             }
         }
         if (auto_play) {

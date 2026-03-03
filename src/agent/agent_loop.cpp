@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <sstream>
-#include <iostream>
 #include <algorithm>
 #include <cctype>
 #include <utility>
@@ -16,6 +15,7 @@
 #include "agent/tools/tts.hpp"
 #include "agent/tools/web.hpp"
 #include "sandbox/sandbox_executor.hpp"
+#include "utils/logging.hpp"
 
 namespace kabot::agent {
 namespace {
@@ -341,9 +341,9 @@ void AgentLoop::RegisterDefaultTools() {
     if (!config_.brave_api_key.empty()) {
         const auto size = config_.brave_api_key.size();
         const auto prefix = size > 4 ? config_.brave_api_key.substr(0, 4) : config_.brave_api_key;
-        std::cerr << "[web] brave api key=" << prefix << "***" << std::endl;
+        LOG_INFO("[web] brave api key={}***", prefix);
     } else {
-        std::cerr << "[web] brave api key is empty" << std::endl;
+        LOG_WARN("[web] brave api key is empty");
     }
     tools_.Register(std::make_unique<kabot::agent::tools::WebSearchTool>(config_.brave_api_key));
     tools_.Register(std::make_unique<kabot::agent::tools::WebFetchTool>());

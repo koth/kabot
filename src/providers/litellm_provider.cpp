@@ -3,12 +3,12 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
-#include <iostream>
 #include <sstream>
 #include <string>
 
 #include "httplib.h"
 #include "nlohmann/json.hpp"
+#include "utils/logging.hpp"
 
 namespace kabot::providers {
 namespace {
@@ -381,14 +381,16 @@ LLMResponse LiteLLMProvider::Chat(
             } else if (!http_proxy_l.empty() && ParseProxyHostPort(http_proxy_l, proxy_host, proxy_port)) {
                 client->set_proxy(proxy_host, proxy_port);
             } else if (!all_proxy.empty() || !all_proxy_l.empty()) {
-                std::cerr << "[llm] ALL_PROXY is set but cpp-httplib only supports HTTP proxy" << std::endl;
+                LOG_WARN("[llm] ALL_PROXY is set but cpp-httplib only supports HTTP proxy");
             }
         }
 
-        std::cerr << "[llm] POST " << scheme_host_port << endpoint
-                  << " model=" << chosen_model
-                  << " api_key=" << MaskKey(api_key_)
-                  << " style=" << (use_anthropic ? "anthropic" : "openai") << std::endl;
+        LOG_INFO("[llm] POST {}{} model={} api_key={} style={}",
+                 scheme_host_port,
+                 endpoint,
+                 chosen_model,
+                 MaskKey(api_key_),
+                 (use_anthropic ? "anthropic" : "openai"));
 
         httplib::Headers headers{{"Content-Type", "application/json"}};
         if (!api_key_.empty()) {
@@ -404,16 +406,16 @@ LLMResponse LiteLLMProvider::Chat(
         if (!response) {
             const auto err = response.error();
             const auto err_text = HttpLibErrorToString(err);
-            std::cerr << "[llm] request failed: httplib error=" << static_cast<int>(err)
-                      << "(" << err_text << ")" << std::endl;
+            LOG_ERROR("[llm] request failed: httplib error={}({})",
+                      static_cast<int>(err),
+                      err_text);
             return LLMResponse{
                 .content = "Error calling LLM: request failed (httplib error=" + std::to_string(static_cast<int>(err)) +
                     ", " + err_text + ")",
                 .finish_reason = "error"};
         }
         if (response->status >= 400) {
-            std::cerr << "[llm] HTTP " << response->status
-                      << " body=" << response->body << std::endl;
+            LOG_ERROR("[llm] HTTP {} body={}", response->status, response->body);
             return LLMResponse{
                 .content = "Error calling LLM: HTTP " + std::to_string(response->status),
                 .finish_reason = "error"};
