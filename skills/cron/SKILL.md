@@ -21,6 +21,7 @@ Use the `cron` tool to schedule reminders or recurring tasks.
 - **包含动作/查询/执行**（如：查天气/整理/生成/检查/统计/汇总/发邮件/拉数据/跑脚本）一律视为 Task。
 - **延迟提醒**必须显式设置 `mode="reminder"`；否则仍按 Task。
 - 用户既要“执行任务”又要“通知结果”，仍用 Task（不设置 reminder）。
+- 如果执行后需要向用户发送消息结果，必须设置 `deliver=true`。
 
 ## Examples
 
