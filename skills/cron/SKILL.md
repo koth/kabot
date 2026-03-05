@@ -20,7 +20,7 @@ Use the `cron` tool to schedule reminders or recurring tasks.
 - **提醒/通知**：消息内容是“提醒/提醒我/通知我/提醒我…”；此类必须设置 `mode="reminder"`。
 - **Reminder 的 deliver 语义**：`deliver=true` 直接把 message 发给用户；`deliver=false` 会走 agent_turn，由大模型生成内容后再发。
 - **包含动作/查询/执行**（如：查天气/整理/生成/检查/统计/汇总/发邮件/拉数据/跑脚本）一律视为 Task。
-- **Task 发送结果**：如果 Task 执行后要发给用户，必须设置 `deliver=false` 且填写 `channel` 与 `to`（否则不发）。
+- **Task 发送结果**：如果 Task 执行后要发给用户，必须设置 `deliver=false` 且填写 `channel` 与 `to`（否则不发）, `channel` 拿不准的话用`lark`。
 - **一次性 vs 周期**：未明确说明“每隔多久/定期/周期性”等频率时，默认一次性，使用 `at`/`at_ms`（不要设置 `every_xxx`）。
 - **every_xxx 仅用于“每隔N分钟/小时/天”**；**cron expr 仅用于“每天/每周/每月/工作日”等固定周期**。
 
