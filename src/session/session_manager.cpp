@@ -115,35 +115,50 @@ void Session::AddToolMessage(const std::string& tool_call_id,
 
 std::vector<kabot::providers::Message> Session::GetHistory(std::size_t max_messages) const {
     std::vector<kabot::providers::Message> history;
-    const auto start = messages_.size() > max_messages ? messages_.size() - max_messages : 0;
-    std::size_t cutoff = start;
+    if (messages_.empty()) {
+        return history;
+    }
+
+    const auto hard_start = messages_.size() > max_messages ? messages_.size() - max_messages : 0;
+    std::size_t start = hard_start;
     std::size_t user_seen = 0;
-    for (std::size_t i = messages_.size(); i-- > start;) {
+    for (std::size_t i = messages_.size(); i-- > hard_start;) {
         if (messages_[i].role == "user") {
             user_seen++;
-            if (user_seen == 3) {
-                cutoff = i;
+            if (user_seen >= 3) {
+                start = i;
                 break;
             }
         }
     }
+
+    if (start > 0) {
+        while (start < messages_.size() && messages_[start].role != "user") {
+            start += 1;
+        }
+    }
+
+    if (start >= messages_.size()) {
+        start = hard_start;
+    }
+
     for (std::size_t i = start; i < messages_.size(); ++i) {
         const auto& entry = messages_[i];
-        const bool allow_tool = i >= cutoff;
-        if (entry.role == "tool" && !allow_tool) {
-            continue;
-        }
         kabot::providers::Message msg{};
         msg.role = entry.role;
         msg.content = entry.content;
         msg.name = entry.name;
         msg.tool_call_id = entry.tool_call_id;
         msg.tool_calls = entry.tool_calls;
-        if (!allow_tool && !msg.tool_calls.empty()) {
-            msg.tool_calls.clear();
-        }
         history.push_back(msg);
     }
+
+    LOG_DEBUG("[session] get_history total_messages={} hard_start={} selected_start={} history_messages={} user_turns_kept={}",
+              messages_.size(),
+              hard_start,
+              start,
+              history.size(),
+              user_seen);
     return history;
 }
 

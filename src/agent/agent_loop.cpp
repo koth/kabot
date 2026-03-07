@@ -4,6 +4,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <initializer_list>
 #include <utility>
 #include <vector>
 
@@ -128,6 +129,98 @@ std::vector<std::string> NormalizeMemoryLines(const std::string& block) {
     return lines;
 }
 
+std::string ToLower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+bool ContainsAnyKeyword(const std::string& haystack,
+                        const std::initializer_list<const char*> keywords) {
+    for (const auto* keyword : keywords) {
+        if (haystack.find(keyword) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool RequiresToolGuardrail(const std::string& content) {
+    const auto lower = ToLower(content);
+    return ContainsAnyKeyword(lower,
+                              {"read ",
+                               "open ",
+                               "check ",
+                               "look at",
+                               "inspect",
+                               "search",
+                               "fetch",
+                               "browse",
+                               "web",
+                               "http",
+                               "curl",
+                               "file",
+                               "folder",
+                               "directory",
+                               "code",
+                               "edit",
+                               "modify",
+                               "change",
+                               "write ",
+                               "create ",
+                               "run ",
+                               "execute",
+                               "command",
+                               "shell",
+                               "terminal",
+                               "send",
+                               "message",
+                               "cron",
+                               "schedule",
+                               "定时",
+                               "读取",
+                               "查看",
+                               "检查",
+                               "搜索",
+                               "查下",
+                               "查一",
+                               "修改",
+                               "改下",
+                               "编辑",
+                               "写入",
+                               "创建",
+                               "生成文件",
+                               "运行",
+                               "执行",
+                               "命令",
+                               "终端",
+                               "发消息",
+                               "发送",
+                               "抓取",
+                               "网页",
+                               "联网"});
+}
+
+std::string BuildToolGuardrailMessage(const std::string& original_request) {
+    std::ostringstream oss;
+    oss << "你刚才那条用户请求很可能需要外部观察或实际副作用。";
+    oss << "在你真正调用所需工具并拿到结果之前，不要声称任务已经完成。";
+    oss << "如果需要工具，请现在立即调用；如果现有工具不足，请明确说明缺少什么，不要假装已经成功完成。";
+    if (!original_request.empty()) {
+        oss << "原始请求：" << original_request;
+    }
+    return oss.str();
+}
+
+void AppendGuardrailUserMessage(std::vector<kabot::providers::Message>& messages,
+                                const std::string& original_request) {
+    kabot::providers::Message reminder{};
+    reminder.role = "user";
+    reminder.content = BuildToolGuardrailMessage(original_request);
+    messages.push_back(std::move(reminder));
+}
+
 }  // namespace
 
 AgentLoop::AgentLoop(
@@ -188,6 +281,13 @@ std::string AgentLoop::ProcessDirect(const std::string& content, const std::stri
     std::string final_content;
     bool message_sent = false;
     const auto model = config_.model.empty() ? provider_.GetDefaultModel() : config_.model;
+    const bool requires_tool_guardrail = RequiresToolGuardrail(content);
+    bool tool_called = false;
+    bool guardrail_retry_used = false;
+
+    LOG_INFO("[agent] process_direct tool_guardrail={} session={}",
+             (requires_tool_guardrail ? "true" : "false"),
+             session_key);
 
     while (iteration < config_.max_iterations) {
         iteration += 1;
@@ -199,6 +299,7 @@ std::string AgentLoop::ProcessDirect(const std::string& content, const std::stri
             config_.temperature);
 
         if (response.HasToolCalls()) {
+            tool_called = true;
             messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls);
             session.AddMessage("assistant", response.content, response.tool_calls);
             for (const auto& call : response.tool_calls) {
@@ -210,10 +311,24 @@ std::string AgentLoop::ProcessDirect(const std::string& content, const std::stri
                 session.AddToolMessage(call.id, call.name, result);
             }
         } else {
+            if (requires_tool_guardrail && !tool_called && !guardrail_retry_used) {
+                guardrail_retry_used = true;
+                LOG_WARN("[agent] process_direct blocked non-tool completion finish_reason={} session={}",
+                         response.finish_reason,
+                         session_key);
+                AppendGuardrailUserMessage(messages, content);
+                continue;
+            }
             final_content = response.content;
             break;
         }
     }
+
+    LOG_INFO("[agent] process_direct completed tool_called={} guardrail_retry_used={} message_sent={} session={}",
+             (tool_called ? "true" : "false"),
+             (guardrail_retry_used ? "true" : "false"),
+             (message_sent ? "true" : "false"),
+             session_key);
 
     if (final_content.empty()) {
         final_content = "Background task completed.";
@@ -285,6 +400,13 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
     std::string final_content;
     bool message_sent = false;
     const auto model = config_.model.empty() ? provider_.GetDefaultModel() : config_.model;
+    const bool requires_tool_guardrail = RequiresToolGuardrail(content);
+    bool tool_called = false;
+    bool guardrail_retry_used = false;
+
+    LOG_INFO("[agent] process_message tool_guardrail={} session={}",
+             (requires_tool_guardrail ? "true" : "false"),
+             msg.SessionKey());
 
     while (iteration < config_.max_iterations) {
         iteration += 1;
@@ -296,6 +418,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
             config_.temperature);
 
         if (response.HasToolCalls()) {
+            tool_called = true;
             messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls);
             session.AddMessage("assistant", response.content, response.tool_calls);
             for (const auto& call : response.tool_calls) {
@@ -307,10 +430,25 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
                 session.AddToolMessage(call.id, call.name, result);
             }
         } else {
+            if (requires_tool_guardrail && !tool_called && !guardrail_retry_used) {
+                guardrail_retry_used = true;
+                LOG_WARN("[agent] process_message blocked non-tool completion finish_reason={} session={}",
+                         response.finish_reason,
+                         msg.SessionKey());
+                AppendGuardrailUserMessage(messages, content);
+                send_typing();
+                continue;
+            }
             final_content = response.content;
             break;
         }
     }
+
+    LOG_INFO("[agent] process_message completed tool_called={} guardrail_retry_used={} message_sent={} session={}",
+             (tool_called ? "true" : "false"),
+             (guardrail_retry_used ? "true" : "false"),
+             (message_sent ? "true" : "false"),
+             msg.SessionKey());
 
     if (final_content.empty()) {
         final_content = "I've completed processing but have no response to give.";
@@ -427,6 +565,13 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
     std::string final_content;
     bool message_sent = false;
     const auto model = config_.model.empty() ? provider_.GetDefaultModel() : config_.model;
+    const bool requires_tool_guardrail = RequiresToolGuardrail(msg.content);
+    bool tool_called = false;
+    bool guardrail_retry_used = false;
+
+    LOG_INFO("[agent] process_system_message tool_guardrail={} session={}",
+             (requires_tool_guardrail ? "true" : "false"),
+             session_key);
 
     while (iteration < config_.max_iterations) {
         iteration += 1;
@@ -438,6 +583,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
             config_.temperature);
 
         if (response.HasToolCalls()) {
+            tool_called = true;
             messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls);
             session.AddMessage("assistant", response.content, response.tool_calls);
             for (const auto& call : response.tool_calls) {
@@ -449,10 +595,24 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
                 session.AddToolMessage(call.id, call.name, result);
             }
         } else {
+            if (requires_tool_guardrail && !tool_called && !guardrail_retry_used) {
+                guardrail_retry_used = true;
+                LOG_WARN("[agent] process_system_message blocked non-tool completion finish_reason={} session={}",
+                         response.finish_reason,
+                         session_key);
+                AppendGuardrailUserMessage(messages, msg.content);
+                continue;
+            }
             final_content = response.content;
             break;
         }
     }
+
+    LOG_INFO("[agent] process_system_message completed tool_called={} guardrail_retry_used={} message_sent={} session={}",
+             (tool_called ? "true" : "false"),
+             (guardrail_retry_used ? "true" : "false"),
+             (message_sent ? "true" : "false"),
+             session_key);
 
     if (final_content.empty()) {
         final_content = "Background task completed.";

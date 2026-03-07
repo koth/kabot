@@ -63,6 +63,11 @@ std::string ContextBuilder::BuildSystemPrompt(
         oss << "# Memory\n\n" << memory << "\n\n";
     }
 
+    oss << "## Tool Use\n";
+    oss << "When the user asks you to inspect files, read code, modify code, write files, run commands, browse the web, fetch external data, send messages, or schedule work, do not claim the task is completed unless you have already called the relevant tool and received its result.\n";
+    oss << "If tools are required but unavailable or insufficient, explicitly say what is missing instead of pretending success.\n";
+    oss << "If you are giving reasoning or advice without executing anything, make that distinction explicit.\n\n";
+
 
 
     oss << "## Memory Writing\n";
