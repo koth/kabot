@@ -72,7 +72,13 @@ def cmd_show(args: argparse.Namespace) -> None:
     for item in data:
         board_name = item.get("board", "")
         if pattern.search(board_name):
-            print(json.dumps(item, ensure_ascii=False, indent=2))
+            print(f"# {board_name}")
+            print()
+            for idx, entry in enumerate(item.get("items", []), 1):
+                title = entry.get("title", "")
+                if title:
+                    print(f"{idx}. {title}")
+            print()
 
 
 def cmd_dump(args: argparse.Namespace) -> None:
