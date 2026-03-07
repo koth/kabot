@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import sys
 import argparse
+import time
 from playwright.sync_api import sync_playwright
+from playwright.sync_api import Error as PlaywrightError
 import html2text
 
 
@@ -13,23 +15,77 @@ def truncate(content: str, max_bytes: int) -> str:
     return truncated + "\n...(truncated)..."
 
 
+def wait_for_stable_dom(page, attempts: int = 8, interval_ms: int = 500, stable_rounds: int = 2) -> str:
+    previous_html = None
+    stable_count = 0
+    last_error = None
+
+    for _ in range(attempts):
+        try:
+            current_html = page.evaluate("() => document.documentElement.outerHTML")
+            if current_html == previous_html and current_html:
+                stable_count += 1
+            else:
+                stable_count = 0
+            previous_html = current_html
+            if stable_count >= stable_rounds:
+                return current_html
+        except PlaywrightError as exc:
+            last_error = exc
+            stable_count = 0
+
+        page.wait_for_timeout(interval_ms)
+
+    if previous_html:
+        return previous_html
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("无法获取稳定的 DOM")
+
+
 def fetch_page_content(url: str, text_only: bool) -> str:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(url, wait_until="networkidle")
-        html_content = page.content()
-        browser.close()
+        try:
+            page = browser.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-        h = html2text.HTML2Text()
-        h.ignore_links = text_only
-        h.ignore_images = False
-        h.ignore_tables = False
-        h.ignore_emphasis = False
-        h.body_width = 0
-        markdown_content = h.handle(html_content)
+            last_error = None
+            html_content = ""
+            for _ in range(3):
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=15000)
+                except PlaywrightError:
+                    pass
 
-        return markdown_content
+                try:
+                    page.wait_for_load_state("networkidle", timeout=5000)
+                except PlaywrightError:
+                    pass
+
+                try:
+                    html_content = wait_for_stable_dom(page)
+                    break
+                except PlaywrightError as exc:
+                    last_error = exc
+                    time.sleep(1)
+
+            if not html_content:
+                if last_error is not None:
+                    raise last_error
+                raise RuntimeError("无法获取页面内容")
+
+            h = html2text.HTML2Text()
+            h.ignore_links = text_only
+            h.ignore_images = False
+            h.ignore_tables = False
+            h.ignore_emphasis = False
+            h.body_width = 0
+            markdown_content = h.handle(html_content)
+
+            return markdown_content
+        finally:
+            browser.close()
 
 
 def main():
