@@ -250,25 +250,41 @@ void AgentLoop::Run() {
             continue;
         }
 
-        kabot::bus::OutboundMessage outbound{};
-        try {
-            if (msg.channel == "system") {
-                outbound = ProcessSystemMessage(msg);
-            } else {
-                outbound = ProcessMessage(msg);
-            }
-        } catch (const std::exception& ex) {
-            outbound.channel = msg.channel;
-            outbound.chat_id = msg.chat_id;
-            outbound.content = std::string("Sorry, I encountered an error: ") + ex.what();
-        }
-
+        auto outbound = HandleInbound(msg);
         bus_.PublishOutbound(outbound);
     }
 }
 
 void AgentLoop::Stop() {
     running_ = false;
+}
+
+kabot::bus::OutboundMessage AgentLoop::HandleInbound(const kabot::bus::InboundMessage& msg) {
+    kabot::bus::OutboundMessage outbound{};
+    try {
+        if (msg.channel == "system") {
+            outbound = ProcessSystemMessage(msg);
+        } else {
+            outbound = ProcessMessage(msg);
+        }
+    } catch (const std::exception& ex) {
+        outbound.channel = msg.channel;
+        outbound.channel_instance = msg.channel_instance;
+        outbound.agent_name = msg.agent_name;
+        outbound.chat_id = msg.chat_id;
+        outbound.content = std::string("Error: ") + ex.what();
+    } catch (...) {
+        outbound.channel = msg.channel;
+        outbound.channel_instance = msg.channel_instance;
+        outbound.agent_name = msg.agent_name;
+        outbound.chat_id = msg.chat_id;
+        outbound.content = "Error: unknown exception";
+    }
+    return outbound;
+}
+
+std::vector<std::string> AgentLoop::RegisteredTools() const {
+    return tools_.List();
 }
 
 std::string AgentLoop::ProcessDirect(const std::string& content, const std::string& session_key) {
@@ -351,6 +367,8 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
         }
         kabot::bus::OutboundMessage typing{};
         typing.channel = msg.channel;
+        typing.channel_instance = msg.channel_instance;
+        typing.agent_name = msg.agent_name;
         typing.chat_id = msg.chat_id;
         typing.metadata["action"] = "typing";
         bus_.PublishOutbound(typing);
@@ -363,7 +381,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
     }
     if (auto* tool = tools_.Get("cron")) {
         if (auto* cron_tool = dynamic_cast<kabot::agent::tools::CronTool*>(tool)) {
-            cron_tool->SetContext(msg.channel, msg.chat_id);
+            cron_tool->SetContext(msg.agent_name, msg.channel_instance.empty() ? msg.channel : msg.channel_instance, msg.chat_id);
         }
     }
     std::string content = msg.content;
@@ -383,6 +401,8 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
         if (content.empty()) {
             kabot::bus::OutboundMessage outbound{};
             outbound.channel = msg.channel;
+            outbound.channel_instance = msg.channel_instance;
+            outbound.agent_name = msg.agent_name;
             outbound.chat_id = msg.chat_id;
             outbound.content = "已创建新会话，请发送新的问题。";
             return outbound;
@@ -464,6 +484,8 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
     kabot::bus::OutboundMessage outbound{};
     if (!message_sent) {
         outbound.channel = msg.channel;
+        outbound.channel_instance = msg.channel_instance;
+        outbound.agent_name = msg.agent_name;
         outbound.chat_id = msg.chat_id;
         outbound.content = final_content;
     }
@@ -471,6 +493,15 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
 }
 
 void AgentLoop::RegisterDefaultTools() {
+    tools_.Register(std::make_unique<kabot::agent::tools::MessageTool>(
+        [this](const kabot::bus::OutboundMessage& msg) {
+            bus_.PublishOutbound(msg);
+        }));
+
+    if (config_.tool_profile == "message_only") {
+        return;
+    }
+
     tools_.Register(std::make_unique<kabot::agent::tools::ReadFileTool>());
     tools_.Register(std::make_unique<kabot::agent::tools::WriteFileTool>());
     tools_.Register(std::make_unique<kabot::agent::tools::EditFileTool>());
@@ -486,10 +517,6 @@ void AgentLoop::RegisterDefaultTools() {
     tools_.Register(std::make_unique<kabot::agent::tools::WebSearchTool>(config_.brave_api_key));
     tools_.Register(std::make_unique<kabot::agent::tools::WebFetchTool>(workspace_));
     tools_.Register(std::make_unique<kabot::agent::tools::RedditFetchTool>());
-    tools_.Register(std::make_unique<kabot::agent::tools::MessageTool>(
-        [this](const kabot::bus::OutboundMessage& msg) {
-            bus_.PublishOutbound(msg);
-        }));
     tools_.Register(std::make_unique<kabot::agent::tools::SpawnTool>());
     tools_.Register(std::make_unique<kabot::agent::tools::EdgeTtsTool>(workspace_));
     if (cron_) {
@@ -553,7 +580,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
     }
     if (auto* tool = tools_.Get("cron")) {
         if (auto* cron_tool = dynamic_cast<kabot::agent::tools::CronTool*>(tool)) {
-            cron_tool->SetContext(origin_channel, origin_chat_id);
+            cron_tool->SetContext(msg.agent_name, origin_channel, origin_chat_id);
         }
     }
 

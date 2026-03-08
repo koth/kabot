@@ -273,6 +273,7 @@ void CronService::LoadStore() {
                     }
                     job.payload.message = ReadStringOrEmpty(payload, "message");
                     job.payload.deliver = payload.value("deliver", false);
+                    job.payload.agent = ReadStringOrEmpty(payload, "agent");
                     job.payload.channel = ReadStringOrEmpty(payload, "channel");
                     job.payload.to = ReadStringOrEmpty(payload, "to");
                 }
@@ -333,6 +334,8 @@ void CronService::SaveStore() {
         payload["kind"] = job.payload.kind;
         payload["message"] = job.payload.message;
         payload["deliver"] = job.payload.deliver;
+        payload["agent"] = job.payload.agent.empty() ? nlohmann::json(nullptr)
+                                                        : nlohmann::json(job.payload.agent);
         payload["channel"] = job.payload.channel.empty() ? nlohmann::json(nullptr)
                                                           : nlohmann::json(job.payload.channel);
         payload["to"] = job.payload.to.empty() ? nlohmann::json(nullptr)

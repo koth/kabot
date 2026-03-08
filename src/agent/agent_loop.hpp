@@ -25,7 +25,9 @@ public:
         kabot::cron::CronService* cron = nullptr);
     void Run();
     void Stop();
+    kabot::bus::OutboundMessage HandleInbound(const kabot::bus::InboundMessage& msg);
     std::string ProcessDirect(const std::string& content, const std::string& session_key);
+    std::vector<std::string> RegisteredTools() const;
 
 private:
     kabot::bus::MessageBus& bus_;

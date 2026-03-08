@@ -13,7 +13,10 @@ namespace kabot::channels {
 
 TelegramChannel::TelegramChannel(const kabot::config::TelegramConfig& config,
                                  kabot::bus::MessageBus& bus)
-    : ChannelBase("telegram", bus, config.allow_from)
+    : ChannelBase(config.name.empty() ? "telegram" : config.name,
+                  bus,
+                  config.allow_from,
+                  config.binding.agent)
     , config_(config) {}
 
 std::string TelegramChannel::JoinParts(const std::vector<std::string>& parts) const {

@@ -13,7 +13,8 @@ class ChannelBase {
 public:
     ChannelBase(std::string name,
                 kabot::bus::MessageBus& bus,
-                std::vector<std::string> allow_from);
+                std::vector<std::string> allow_from,
+                std::string binding_agent);
     virtual ~ChannelBase() = default;
     virtual std::string Name() const { return name_; }
     virtual void Start() = 0;
@@ -34,6 +35,7 @@ protected:
     std::string name_;
     kabot::bus::MessageBus& bus_;
     std::vector<std::string> allow_from_;
+    std::string binding_agent_;
     bool running_ = false;
 };
 

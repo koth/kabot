@@ -1,28 +1,48 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace kabot::config {
 
+struct ChannelBindingConfig {
+    std::string agent;
+};
+
 struct TelegramConfig {
+    std::string name = "telegram";
     bool enabled = false;
     std::string token;
     std::vector<std::string> allow_from;
+    ChannelBindingConfig binding;
 };
 
 struct LarkConfig {
+    std::string name = "lark";
     bool enabled = false;
     std::string app_id;
     std::string app_secret;
     std::string domain;
     int timeout_ms = 10000;
     std::vector<std::string> allow_from;
+    ChannelBindingConfig binding;
+};
+
+struct ChannelInstanceConfig {
+    std::string name;
+    std::string type;
+    bool enabled = true;
+    std::vector<std::string> allow_from;
+    ChannelBindingConfig binding;
+    TelegramConfig telegram;
+    LarkConfig lark;
 };
 
 struct ChannelsConfig {
     TelegramConfig telegram;
     LarkConfig lark;
+    std::vector<ChannelInstanceConfig> instances;
 };
 
 struct ProviderConfig {
@@ -44,6 +64,7 @@ struct ProvidersConfig {
 struct AgentDefaults {
     std::string workspace = "~/.kabot/workspace";
     std::string model = "anthropic/claude-opus-4-5";
+    std::string tool_profile = "full";
     std::string brave_api_key;
     int max_iterations = 20;
     int max_tokens = 8192;
@@ -52,8 +73,13 @@ struct AgentDefaults {
     int max_history_messages = 50;
 };
 
+struct AgentInstanceConfig : AgentDefaults {
+    std::string name = "default";
+};
+
 struct AgentsConfig {
     AgentDefaults defaults;
+    std::vector<AgentInstanceConfig> instances;
 };
 
 struct HeartbeatConfig {
@@ -89,6 +115,24 @@ struct Config {
     ProvidersConfig providers;
     QmdConfig qmd;
     LoggingConfig logging;
+
+    const AgentInstanceConfig* FindAgent(const std::string& name) const {
+        for (const auto& agent : agents.instances) {
+            if (agent.name == name) {
+                return &agent;
+            }
+        }
+        return nullptr;
+    }
+
+    const ChannelInstanceConfig* FindChannelInstance(const std::string& name) const {
+        for (const auto& channel : channels.instances) {
+            if (channel.name == name) {
+                return &channel;
+            }
+        }
+        return nullptr;
+    }
 };
 
 }  // namespace kabot::config

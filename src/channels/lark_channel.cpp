@@ -54,7 +54,10 @@ bool IsVideoExtension(const std::string& ext) {
 
 LarkChannel::LarkChannel(const kabot::config::LarkConfig& config,
                          kabot::bus::MessageBus& bus)
-    : ChannelBase("lark", bus, config.allow_from)
+    : ChannelBase(config.name.empty() ? "lark" : config.name,
+                  bus,
+                  config.allow_from,
+                  config.binding.agent)
     , config_(config) {
     lark_config_.app_id = config_.app_id;
     lark_config_.app_secret = config_.app_secret;

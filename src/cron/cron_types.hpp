@@ -24,6 +24,7 @@ struct CronPayload {
     std::string kind = "agent_turn";
     std::string message;
     bool deliver = false;
+    std::string agent;
     std::string channel;
     std::string to;
 };

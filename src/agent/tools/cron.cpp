@@ -99,6 +99,7 @@ nlohmann::json BuildPayloadJson(const kabot::cron::CronPayload& payload) {
         {"kind", payload.kind},
         {"message", payload.message},
         {"deliver", payload.deliver},
+        {"agent", payload.agent.empty() ? nlohmann::json(nullptr) : nlohmann::json(payload.agent)},
         {"channel", payload.channel.empty() ? nlohmann::json(nullptr) : nlohmann::json(payload.channel)},
         {"to", payload.to.empty() ? nlohmann::json(nullptr) : nlohmann::json(payload.to)}
     };
@@ -120,7 +121,10 @@ nlohmann::json BuildStateJson(const kabot::cron::CronJobState& state) {
 CronTool::CronTool(kabot::cron::CronService* cron)
     : cron_(cron) {}
 
-void CronTool::SetContext(const std::string& channel, const std::string& to) {
+void CronTool::SetContext(const std::string& agent,
+                          const std::string& channel,
+                          const std::string& to) {
+    default_agent_ = agent;
     default_channel_ = channel;
     default_to_ = to;
 }
@@ -228,14 +232,21 @@ std::string CronTool::Execute(const std::unordered_map<std::string, std::string>
             return "Error: message is required";
         }
         job.payload.deliver = ParseBool(GetParam(params, "deliver"), false);
+        job.payload.agent = GetParam(params, "agent");
         job.payload.channel = GetParam(params, "channel");
         job.payload.to = GetParam(params, "to");
+        if (job.payload.agent.empty()) {
+            job.payload.agent = default_agent_;
+        }
+        if (job.payload.channel.empty()) {
+            job.payload.channel = default_channel_;
+        }
+        if (job.payload.to.empty()) {
+            job.payload.to = default_to_;
+        }
         if (job.payload.deliver) {
-            if (job.payload.channel.empty()) {
-                job.payload.channel = default_channel_;
-            }
-            if (job.payload.to.empty()) {
-                job.payload.to = default_to_;
+            if (job.payload.channel.empty() || job.payload.to.empty()) {
+                return "Error: no target channel/to available for deliver job";
             }
         }
 

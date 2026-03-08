@@ -9,10 +9,12 @@ namespace kabot::channels {
 
 ChannelBase::ChannelBase(std::string name,
                          kabot::bus::MessageBus& bus,
-                         std::vector<std::string> allow_from)
+                         std::vector<std::string> allow_from,
+                         std::string binding_agent)
     : name_(std::move(name))
     , bus_(bus)
-    , allow_from_(std::move(allow_from)) {}
+    , allow_from_(std::move(allow_from))
+    , binding_agent_(std::move(binding_agent)) {}
 
 bool ChannelBase::IsAllowed(const std::string& sender_id) const {
     if (allow_from_.empty()) {
@@ -46,6 +48,8 @@ void ChannelBase::HandleMessage(
     }
     kabot::bus::InboundMessage msg{};
     msg.channel = name_;
+    msg.channel_instance = name_;
+    msg.agent_name = binding_agent_;
     msg.sender_id = sender_id;
     msg.chat_id = chat_id;
     msg.content = content;

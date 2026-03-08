@@ -190,6 +190,7 @@ set(KABOT_SOURCES
   config/config_loader.cpp
   providers/llm_provider.cpp
   providers/litellm_provider.cpp
+  agent/agent_registry.cpp
   agent/agent_loop.cpp
   agent/context_builder.cpp
   agent/memory_store.cpp
@@ -242,6 +243,37 @@ endif()
 
 add_executable(tts_test tts_test.cpp)
 target_link_libraries(tts_test PRIVATE kabot_core kabot_tts)
+
+add_executable(config_tests
+  config_tests.cpp
+  config/config_loader.cpp
+)
+target_link_libraries(config_tests PRIVATE kabot_core)
+
+add_executable(routing_tests
+  routing_tests.cpp
+  agent/agent_registry.cpp
+  agent/agent_loop.cpp
+  agent/context_builder.cpp
+  agent/memory_store.cpp
+  agent/skills_loader.cpp
+  agent/tools/filesystem.cpp
+  agent/tools/cron.cpp
+  agent/tools/tts.cpp
+  agent/tools/message.cpp
+  agent/tools/shell.cpp
+  agent/tools/spawn.cpp
+  agent/tools/tool_registry.cpp
+  agent/tools/web.cpp
+  sandbox/sandbox_executor.cpp
+  cron/cron_service.cpp
+  session/session_manager.cpp
+  config/config_loader.cpp
+  providers/llm_provider.cpp
+  providers/litellm_provider.cpp
+  bus/message_bus.cpp
+)
+target_link_libraries(routing_tests PRIVATE kabot_core)
 
 if(APPLE)
   target_link_options(kabot_cli PRIVATE "-Wl,-no_warn_duplicate_libraries")

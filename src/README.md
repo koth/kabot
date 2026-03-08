@@ -174,3 +174,89 @@ C:\dev\vcpkg\vcpkg.exe install openssl curl sqlite3 boost-filesystem boost-syste
 cmake -S .\src -B .\build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake
 cmake --build .\build --config Release
 ```
+
+## 多 agent / 多 channel instance 配置
+
+当前推荐的运行模型是：
+
+- 一个 `channel instance` 表示一个实际接收消息的账号或机器人实例
+- 一个 `channel instance` 通过 `binding.agent` 绑定一个 agent
+- 一个 `agent` 可以配置独立 `workspace`
+- 一个 `agent` 可以通过 `toolProfile` 配置可用工具范围
+
+示例：
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-opus-4-5",
+      "workspace": "D:/kabot/workspaces/default",
+      "toolProfile": "full"
+    },
+    "instances": [
+      {
+        "name": "ops-agent",
+        "workspace": "D:/kabot/workspaces/ops",
+        "toolProfile": "full"
+      },
+      {
+        "name": "sales-agent",
+        "workspace": "D:/kabot/workspaces/sales",
+        "toolProfile": "message_only"
+      }
+    ]
+  },
+  "channels": {
+    "instances": [
+      {
+        "name": "telegram_ops",
+        "type": "telegram",
+        "enabled": true,
+        "token": "<telegram-bot-token>",
+        "allowFrom": ["12345678"],
+        "binding": {
+          "agent": "ops-agent"
+        }
+      },
+      {
+        "name": "lark_sales",
+        "type": "lark",
+        "enabled": true,
+        "appId": "<lark-app-id>",
+        "appSecret": "<lark-app-secret>",
+        "binding": {
+          "agent": "sales-agent"
+        }
+      }
+    ]
+  }
+}
+```
+
+### agent 工具档位
+
+当前支持两个 `toolProfile`：
+
+- `full`
+  - 使用当前默认的完整工具集
+- `message_only`
+  - 只允许 `message` 工具
+
+这适合把某些 agent 配置成“只能发消息/转发消息”的轻代理，而不允许文件、命令、网页搜索、cron 等其他工具。
+
+### 迁移说明
+
+旧配置仍然兼容：
+
+- `agents.defaults` 会自动映射为默认 agent 实例 `default`
+- `channels.telegram` / `channels.lark` 会自动映射为默认 channel instance
+
+推荐逐步迁移到新的 `channels.instances` 结构，并为每个接收账号显式配置：
+
+- `name`
+- `type`
+- 渠道接入参数
+- `binding.agent`
+
+如果 `binding.agent` 缺失，或引用了不存在的 agent，启动会直接失败。

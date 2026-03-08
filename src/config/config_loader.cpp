@@ -5,11 +5,15 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 #include "nlohmann/json.hpp"
 
 namespace kabot::config {
+
+Config LoadConfig(const std::filesystem::path& config_path);
+
 namespace {
 
 std::string GetEnv(const char* name) {
@@ -51,6 +55,179 @@ void ApplyProviderConfig(ProviderConfig& target, const nlohmann::json& source) {
     }
 }
 
+void ApplyAgentDefaults(AgentDefaults& target, const nlohmann::json& source) {
+    if (!source.is_object()) {
+        return;
+    }
+    if (source.contains("workspace") && source["workspace"].is_string()) {
+        target.workspace = source["workspace"].get<std::string>();
+    }
+    if (source.contains("model") && source["model"].is_string()) {
+        target.model = source["model"].get<std::string>();
+    }
+    if (source.contains("toolProfile") && source["toolProfile"].is_string()) {
+        target.tool_profile = source["toolProfile"].get<std::string>();
+    }
+    if (source.contains("maxTokens") && source["maxTokens"].is_number_integer()) {
+        target.max_tokens = source["maxTokens"].get<int>();
+    }
+    if (source.contains("temperature") && source["temperature"].is_number()) {
+        target.temperature = source["temperature"].get<double>();
+    }
+    if (source.contains("maxToolIterations") && source["maxToolIterations"].is_number_integer()) {
+        const auto value = source["maxToolIterations"].get<int>();
+        target.max_tool_iterations = value;
+        target.max_iterations = value;
+    }
+    if (source.contains("maxIterations") && source["maxIterations"].is_number_integer()) {
+        target.max_iterations = source["maxIterations"].get<int>();
+    }
+    if (source.contains("maxHistoryMessages") && source["maxHistoryMessages"].is_number_integer()) {
+        target.max_history_messages = source["maxHistoryMessages"].get<int>();
+    }
+}
+
+void ApplyBindingConfig(ChannelBindingConfig& target, const nlohmann::json& source) {
+    if (!source.is_object()) {
+        return;
+    }
+    if (source.contains("agent") && source["agent"].is_string()) {
+        target.agent = source["agent"].get<std::string>();
+    } else if (source.contains("defaultAgent") && source["defaultAgent"].is_string()) {
+        target.agent = source["defaultAgent"].get<std::string>();
+    } else if (source.contains("agents") && source["agents"].is_array()) {
+        for (const auto& item : source["agents"]) {
+            if (item.is_string()) {
+                target.agent = item.get<std::string>();
+                break;
+            }
+        }
+    }
+}
+
+void ApplyTelegramConfig(TelegramConfig& target, const nlohmann::json& source) {
+    if (!source.is_object()) {
+        return;
+    }
+    if (source.contains("name") && source["name"].is_string()) {
+        target.name = source["name"].get<std::string>();
+    }
+    if (source.contains("enabled") && source["enabled"].is_boolean()) {
+        target.enabled = source["enabled"].get<bool>();
+    }
+    if (source.contains("token") && source["token"].is_string()) {
+        target.token = source["token"].get<std::string>();
+    }
+    if (source.contains("allowFrom") && source["allowFrom"].is_array()) {
+        target.allow_from.clear();
+        for (const auto& item : source["allowFrom"]) {
+            if (item.is_string()) {
+                target.allow_from.push_back(item.get<std::string>());
+            }
+        }
+    }
+    if (source.contains("binding")) {
+        ApplyBindingConfig(target.binding, source["binding"]);
+    }
+}
+
+void ApplyLarkConfig(LarkConfig& target, const nlohmann::json& source) {
+    if (!source.is_object()) {
+        return;
+    }
+    if (source.contains("name") && source["name"].is_string()) {
+        target.name = source["name"].get<std::string>();
+    }
+    if (source.contains("enabled") && source["enabled"].is_boolean()) {
+        target.enabled = source["enabled"].get<bool>();
+    }
+    if (source.contains("appId") && source["appId"].is_string()) {
+        target.app_id = source["appId"].get<std::string>();
+    }
+    if (source.contains("appSecret") && source["appSecret"].is_string()) {
+        target.app_secret = source["appSecret"].get<std::string>();
+    }
+    if (source.contains("domain") && source["domain"].is_string()) {
+        target.domain = source["domain"].get<std::string>();
+    }
+    if (source.contains("timeoutMs") && source["timeoutMs"].is_number_integer()) {
+        target.timeout_ms = source["timeoutMs"].get<int>();
+    }
+    if (source.contains("allowFrom") && source["allowFrom"].is_array()) {
+        target.allow_from.clear();
+        for (const auto& item : source["allowFrom"]) {
+            if (item.is_string()) {
+                target.allow_from.push_back(item.get<std::string>());
+            }
+        }
+    }
+    if (source.contains("binding")) {
+        ApplyBindingConfig(target.binding, source["binding"]);
+    }
+}
+
+void NormalizeConfig(Config& config) {
+    if (config.agents.instances.empty()) {
+        AgentInstanceConfig agent{};
+        static_cast<AgentDefaults&>(agent) = config.agents.defaults;
+        agent.name = "default";
+        config.agents.instances.push_back(agent);
+    }
+
+    if (config.channels.instances.empty()) {
+        if (config.channels.telegram.enabled) {
+            ChannelInstanceConfig instance{};
+            instance.name = config.channels.telegram.name.empty() ? "telegram" : config.channels.telegram.name;
+            instance.type = "telegram";
+            instance.enabled = config.channels.telegram.enabled;
+            instance.allow_from = config.channels.telegram.allow_from;
+            instance.binding = config.channels.telegram.binding;
+            instance.telegram = config.channels.telegram;
+            instance.telegram.name = instance.name;
+            config.channels.instances.push_back(instance);
+        }
+        if (config.channels.lark.enabled) {
+            ChannelInstanceConfig instance{};
+            instance.name = config.channels.lark.name.empty() ? "lark" : config.channels.lark.name;
+            instance.type = "lark";
+            instance.enabled = config.channels.lark.enabled;
+            instance.allow_from = config.channels.lark.allow_from;
+            instance.binding = config.channels.lark.binding;
+            instance.lark = config.channels.lark;
+            instance.lark.name = instance.name;
+            config.channels.instances.push_back(instance);
+        }
+    }
+
+    for (auto& instance : config.channels.instances) {
+        if (instance.type == "telegram") {
+            if (instance.name.empty()) {
+                instance.name = instance.telegram.name.empty() ? "telegram" : instance.telegram.name;
+            }
+            instance.telegram.name = instance.name;
+            instance.allow_from = instance.allow_from.empty() ? instance.telegram.allow_from : instance.allow_from;
+            if (instance.binding.agent.empty()) {
+                instance.binding = instance.telegram.binding;
+            }
+            instance.enabled = instance.enabled && !instance.telegram.token.empty();
+        } else if (instance.type == "lark") {
+            if (instance.name.empty()) {
+                instance.name = instance.lark.name.empty() ? "lark" : instance.lark.name;
+            }
+            instance.lark.name = instance.name;
+            instance.allow_from = instance.allow_from.empty() ? instance.lark.allow_from : instance.allow_from;
+            if (instance.binding.agent.empty()) {
+                instance.binding = instance.lark.binding;
+            }
+            instance.enabled = instance.enabled && !instance.lark.app_id.empty() && !instance.lark.app_secret.empty();
+        }
+
+        if (instance.binding.agent.empty()) {
+            instance.binding.agent = config.agents.instances.front().name;
+        }
+    }
+}
+
 void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
     if (!data.is_object()) {
         return;
@@ -59,26 +236,21 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
     if (data.contains("agents") && data["agents"].is_object()) {
         const auto& agents = data["agents"];
         if (agents.contains("defaults") && agents["defaults"].is_object()) {
-            const auto& defaults = agents["defaults"];
-            if (defaults.contains("workspace") && defaults["workspace"].is_string()) {
-                config.agents.defaults.workspace = defaults["workspace"].get<std::string>();
-            }
-            if (defaults.contains("model") && defaults["model"].is_string()) {
-                config.agents.defaults.model = defaults["model"].get<std::string>();
-            }
-            if (defaults.contains("maxTokens") && defaults["maxTokens"].is_number_integer()) {
-                config.agents.defaults.max_tokens = defaults["maxTokens"].get<int>();
-            }
-            if (defaults.contains("temperature") && defaults["temperature"].is_number()) {
-                config.agents.defaults.temperature = defaults["temperature"].get<double>();
-            }
-            if (defaults.contains("maxToolIterations") && defaults["maxToolIterations"].is_number_integer()) {
-                const auto value = defaults["maxToolIterations"].get<int>();
-                config.agents.defaults.max_tool_iterations = value;
-                config.agents.defaults.max_iterations = value;
-            }
-            if (defaults.contains("maxHistoryMessages") && defaults["maxHistoryMessages"].is_number_integer()) {
-                config.agents.defaults.max_history_messages = defaults["maxHistoryMessages"].get<int>();
+            ApplyAgentDefaults(config.agents.defaults, agents["defaults"]);
+        }
+        if (agents.contains("instances") && agents["instances"].is_array()) {
+            config.agents.instances.clear();
+            for (const auto& item : agents["instances"]) {
+                if (!item.is_object()) {
+                    continue;
+                }
+                AgentInstanceConfig agent{};
+                static_cast<AgentDefaults&>(agent) = config.agents.defaults;
+                if (item.contains("name") && item["name"].is_string()) {
+                    agent.name = item["name"].get<std::string>();
+                }
+                ApplyAgentDefaults(agent, item);
+                config.agents.instances.push_back(agent);
             }
         }
     }
@@ -86,46 +258,45 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
     if (data.contains("channels") && data["channels"].is_object()) {
         const auto& channels = data["channels"];
         if (channels.contains("telegram") && channels["telegram"].is_object()) {
-            const auto& telegram = channels["telegram"];
-            if (telegram.contains("enabled") && telegram["enabled"].is_boolean()) {
-                config.channels.telegram.enabled = telegram["enabled"].get<bool>();
-            }
-            if (telegram.contains("token") && telegram["token"].is_string()) {
-                config.channels.telegram.token = telegram["token"].get<std::string>();
-            }
-            if (telegram.contains("allowFrom") && telegram["allowFrom"].is_array()) {
-                config.channels.telegram.allow_from.clear();
-                for (const auto& item : telegram["allowFrom"]) {
-                    if (item.is_string()) {
-                        config.channels.telegram.allow_from.push_back(item.get<std::string>());
-                    }
-                }
-            }
+            ApplyTelegramConfig(config.channels.telegram, channels["telegram"]);
         }
         if (channels.contains("lark") && channels["lark"].is_object()) {
-            const auto& lark = channels["lark"];
-            if (lark.contains("enabled") && lark["enabled"].is_boolean()) {
-                config.channels.lark.enabled = lark["enabled"].get<bool>();
-            }
-            if (lark.contains("appId") && lark["appId"].is_string()) {
-                config.channels.lark.app_id = lark["appId"].get<std::string>();
-            }
-            if (lark.contains("appSecret") && lark["appSecret"].is_string()) {
-                config.channels.lark.app_secret = lark["appSecret"].get<std::string>();
-            }
-            if (lark.contains("domain") && lark["domain"].is_string()) {
-                config.channels.lark.domain = lark["domain"].get<std::string>();
-            }
-            if (lark.contains("timeoutMs") && lark["timeoutMs"].is_number_integer()) {
-                config.channels.lark.timeout_ms = lark["timeoutMs"].get<int>();
-            }
-            if (lark.contains("allowFrom") && lark["allowFrom"].is_array()) {
-                config.channels.lark.allow_from.clear();
-                for (const auto& item : lark["allowFrom"]) {
-                    if (item.is_string()) {
-                        config.channels.lark.allow_from.push_back(item.get<std::string>());
+            ApplyLarkConfig(config.channels.lark, channels["lark"]);
+        }
+        if (channels.contains("instances") && channels["instances"].is_array()) {
+            config.channels.instances.clear();
+            for (const auto& item : channels["instances"]) {
+                if (!item.is_object()) {
+                    continue;
+                }
+                ChannelInstanceConfig instance{};
+                if (item.contains("name") && item["name"].is_string()) {
+                    instance.name = item["name"].get<std::string>();
+                }
+                if (item.contains("type") && item["type"].is_string()) {
+                    instance.type = item["type"].get<std::string>();
+                }
+                if (item.contains("enabled") && item["enabled"].is_boolean()) {
+                    instance.enabled = item["enabled"].get<bool>();
+                }
+                if (item.contains("allowFrom") && item["allowFrom"].is_array()) {
+                    for (const auto& allow_item : item["allowFrom"]) {
+                        if (allow_item.is_string()) {
+                            instance.allow_from.push_back(allow_item.get<std::string>());
+                        }
                     }
                 }
+                if (item.contains("binding")) {
+                    ApplyBindingConfig(instance.binding, item["binding"]);
+                }
+                if (instance.type == "telegram") {
+                    instance.telegram = config.channels.telegram;
+                    ApplyTelegramConfig(instance.telegram, item);
+                } else if (instance.type == "lark") {
+                    instance.lark = config.channels.lark;
+                    ApplyLarkConfig(instance.lark, item);
+                }
+                config.channels.instances.push_back(instance);
             }
         }
     }
@@ -274,9 +445,12 @@ std::vector<std::string> SplitCsv(const std::string& value) {
 }  // namespace
 
 Config LoadConfig() {
+    return LoadConfig(GetConfigPath());
+}
+
+Config LoadConfig(const std::filesystem::path& config_path) {
     Config config{};
 
-    const auto config_path = GetConfigPath();
     if (std::filesystem::exists(config_path)) {
         try {
             std::ifstream input(config_path);
@@ -582,7 +756,44 @@ Config LoadConfig() {
             config.heartbeat.cron_http_port);
     }
 
+    NormalizeConfig(config);
+
     return config;
+}
+
+std::vector<std::string> ValidateConfig(const Config& config) {
+    std::vector<std::string> errors;
+    std::set<std::string> agent_names;
+    for (const auto& agent : config.agents.instances) {
+        if (agent.name.empty()) {
+            errors.push_back("agent instance name must not be empty");
+            continue;
+        }
+        if (!agent_names.insert(agent.name).second) {
+            errors.push_back("duplicate agent name: " + agent.name);
+        }
+        if (agent.tool_profile != "full" && agent.tool_profile != "message_only") {
+            errors.push_back("agent instance " + agent.name + " has unsupported toolProfile: " + agent.tool_profile);
+        }
+    }
+
+    std::set<std::string> channel_names;
+    for (const auto& channel : config.channels.instances) {
+        if (channel.name.empty()) {
+            errors.push_back("channel instance name must not be empty");
+        } else if (!channel_names.insert(channel.name).second) {
+            errors.push_back("duplicate channel instance name: " + channel.name);
+        }
+        if (channel.type != "telegram" && channel.type != "lark") {
+            errors.push_back("unsupported channel type for instance " + channel.name + ": " + channel.type);
+        }
+        if (channel.binding.agent.empty()) {
+            errors.push_back("channel instance has no bound agent: " + channel.name);
+        } else if (!config.FindAgent(channel.binding.agent)) {
+            errors.push_back("channel instance " + channel.name + " references unknown agent: " + channel.binding.agent);
+        }
+    }
+    return errors;
 }
 
 }  // namespace kabot::config

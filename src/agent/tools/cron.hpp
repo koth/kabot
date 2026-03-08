@@ -12,7 +12,9 @@ class CronTool : public Tool {
 public:
     explicit CronTool(kabot::cron::CronService* cron);
 
-    void SetContext(const std::string& channel, const std::string& to);
+    void SetContext(const std::string& agent,
+                    const std::string& channel,
+                    const std::string& to);
 
     std::string Name() const override { return "cron"; }
     std::string Description() const override { return "Manage scheduled cron jobs."; }
@@ -21,6 +23,7 @@ public:
 
 private:
     kabot::cron::CronService* cron_ = nullptr;
+    std::string default_agent_;
     std::string default_channel_;
     std::string default_to_;
 };

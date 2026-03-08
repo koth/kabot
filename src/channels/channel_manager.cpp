@@ -24,8 +24,9 @@ ChannelManager::ChannelManager(const kabot::config::Config& config,
 }
 
 void ChannelManager::InitChannels() {
-    RegisterTelegram(config_.channels.telegram);
-    RegisterLark(config_.channels.lark);
+    for (const auto& instance : config_.channels.instances) {
+        RegisterInstance(instance);
+    }
 }
 
 void ChannelManager::Register(std::unique_ptr<ChannelBase> channel) {
@@ -74,10 +75,11 @@ std::unordered_map<std::string, bool> ChannelManager::Status() const {
 }
 
 bool ChannelManager::SendWithRetry(const kabot::bus::OutboundMessage& msg) {
-    auto channel = GetChannel(msg.channel);
+    const auto& channel_name = msg.channel_instance.empty() ? msg.channel : msg.channel_instance;
+    auto channel = GetChannel(channel_name);
     if (!channel) {
         LOG_ERROR("[channel] outbound send failed: unknown channel={} chat_id={}",
-                  msg.channel,
+                  channel_name,
                   msg.chat_id);
         return false;
     }
@@ -93,7 +95,7 @@ bool ChannelManager::SendWithRetry(const kabot::bus::OutboundMessage& msg) {
         if (sent) {
             if (attempt > 1) {
                 LOG_WARN("[channel] outbound send recovered after retry channel={} chat_id={} attempt={}",
-                         msg.channel,
+                         channel_name,
                          msg.chat_id,
                          attempt);
             }
@@ -101,7 +103,7 @@ bool ChannelManager::SendWithRetry(const kabot::bus::OutboundMessage& msg) {
         }
 
         LOG_ERROR("[channel] outbound send failed channel={} chat_id={} attempt={}/{} reply_to={} content_size={} media_count={}",
-                  msg.channel,
+                  channel_name,
                   msg.chat_id,
                   attempt,
                   max_attempts,
@@ -117,18 +119,15 @@ bool ChannelManager::SendWithRetry(const kabot::bus::OutboundMessage& msg) {
     return false;
 }
 
-void ChannelManager::RegisterTelegram(const kabot::config::TelegramConfig& config) {
+void ChannelManager::RegisterInstance(const kabot::config::ChannelInstanceConfig& config) {
     if (!config.enabled) {
         return;
     }
-    Register(std::make_unique<TelegramChannel>(config, bus_));
-}
-
-void ChannelManager::RegisterLark(const kabot::config::LarkConfig& config) {
-    if (!config.enabled) {
-        return;
+    if (config.type == "telegram") {
+        Register(std::make_unique<TelegramChannel>(config.telegram, bus_));
+    } else if (config.type == "lark") {
+        Register(std::make_unique<LarkChannel>(config.lark, bus_));
     }
-    Register(std::make_unique<LarkChannel>(config, bus_));
 }
 
 void ChannelManager::RunOutboundDispatcher() {
