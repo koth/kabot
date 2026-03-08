@@ -10,7 +10,23 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <cstdlib>
+#include <cctype>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
+#include <Windows.h>
+#include <process.h>
+#else
 #include <unistd.h>
+#include <sys/types.h>
+#include <signal.h>
+#endif
 
 #include "agent/agent_loop.hpp"
 #include "bus/message_bus.hpp"
@@ -29,8 +45,20 @@ std::atomic<bool> g_running{true};
 volatile std::sig_atomic_t g_signal = 0;
 const char* g_argv0 = nullptr;
 
+#ifdef _WIN32
+using ProcessId = int;
+constexpr int kReloadSignal = SIGBREAK;
+#else
+using ProcessId = pid_t;
+constexpr int kReloadSignal = SIGHUP;
+#endif
+
 std::filesystem::path GetHomePath() {
+#ifdef _WIN32
+    const char* home = std::getenv("USERPROFILE");
+#else
     const char* home = std::getenv("HOME");
+#endif
     return std::filesystem::path(home ? home : ".");
 }
 
@@ -102,23 +130,34 @@ nlohmann::json BuildStateJson(const kabot::cron::CronJobState& state) {
     return json;
 }
 
-bool IsProcessRunning(pid_t pid) {
+bool IsProcessRunning(ProcessId pid) {
     if (pid <= 0) {
         return false;
     }
+#ifdef _WIN32
+    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (!process) {
+        return false;
+    }
+    DWORD exit_code = 0;
+    const BOOL ok = GetExitCodeProcess(process, &exit_code);
+    CloseHandle(process);
+    return ok && exit_code == STILL_ACTIVE;
+#else
     if (::kill(pid, 0) == 0) {
         return true;
     }
     return errno == EPERM;
+#endif
 }
 
-std::optional<pid_t> ReadPidFile() {
+std::optional<ProcessId> ReadPidFile() {
     const auto path = GetPidFilePath();
     std::ifstream input(path);
     if (!input.is_open()) {
         return std::nullopt;
     }
-    pid_t pid = 0;
+    ProcessId pid = 0;
     input >> pid;
     if (pid <= 0) {
         return std::nullopt;
@@ -126,7 +165,7 @@ std::optional<pid_t> ReadPidFile() {
     return pid;
 }
 
-bool WritePidFile(pid_t pid) {
+bool WritePidFile(ProcessId pid) {
     const auto path = GetPidFilePath();
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
@@ -144,7 +183,7 @@ void RemovePidFile() {
     std::filesystem::remove(path, ec);
 }
 
-bool WaitForExit(pid_t pid, std::chrono::seconds timeout) {
+bool WaitForExit(ProcessId pid, std::chrono::seconds timeout) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
         if (!IsProcessRunning(pid)) {
@@ -179,7 +218,11 @@ int RunGateway() {
     }
     RemovePidFile();
 
+#ifdef _WIN32
+    if (!WritePidFile(_getpid())) {
+#else
     if (!WritePidFile(::getpid())) {
+#endif
         LOG_ERROR("Failed to write gateway pid file.");
         return 1;
     }
@@ -327,6 +370,11 @@ int RunGateway() {
         res.set_content(json.dump(2), "application/json");
     });
 
+    std::signal(SIGINT, HandleSignal);
+    std::signal(SIGTERM, HandleSignal);
+#ifdef _WIN32
+    std::signal(SIGBREAK, HandleSignal);
+#else
     struct sigaction action {};
     action.sa_handler = HandleSignal;
     sigemptyset(&action.sa_mask);
@@ -334,6 +382,7 @@ int RunGateway() {
     sigaction(SIGINT, &action, nullptr);
     sigaction(SIGTERM, &action, nullptr);
     sigaction(SIGHUP, &action, nullptr);
+#endif
 
     std::thread agent_thread([&agent]() { agent.Run(); });
     const std::string cron_http_host = config.heartbeat.cron_http_host;
@@ -352,7 +401,7 @@ int RunGateway() {
     bool restart_requested = false;
     while (g_running.load()) {
         if (g_signal != 0) {
-            if (g_signal == SIGHUP) {
+            if (g_signal == kReloadSignal) {
                 restart_requested = true;
             }
             g_running.store(false);
@@ -379,10 +428,15 @@ int RunGateway() {
     }
     RemovePidFile();
     if (restart_requested && g_argv0) {
+#ifdef _WIN32
+        LOG_ERROR("Gateway restart via signal is not supported on Windows.");
+        return 1;
+#else
         const char* args[] = {g_argv0, "gateway", nullptr};
         ::execv(g_argv0, const_cast<char* const*>(args));
         LOG_ERROR("Failed to restart gateway.");
         return 1;
+#endif
     }
     return 0;
 }
@@ -390,15 +444,28 @@ int RunGateway() {
 int RestartGateway(const char* argv0) {
     const auto pid = ReadPidFile();
     if (pid && IsProcessRunning(*pid)) {
+#ifdef _WIN32
+        HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, static_cast<DWORD>(*pid));
+        if (process) {
+            TerminateProcess(process, 0);
+            CloseHandle(process);
+        }
+#else
         ::kill(*pid, SIGTERM);
+#endif
         WaitForExit(*pid, std::chrono::seconds(8));
     }
     RemovePidFile();
 
+#ifdef _WIN32
+    LOG_ERROR("Restart command is not supported on Windows.");
+    return 1;
+#else
     const char* args[] = {argv0, "gateway", nullptr};
     ::execv(argv0, const_cast<char* const*>(args));
     LOG_ERROR("Failed to restart gateway.");
     return 1;
+#endif
 }
 
 int HupGateway() {
@@ -407,8 +474,13 @@ int HupGateway() {
         LOG_WARN("kabot gateway not running.");
         return 1;
     }
+#ifdef _WIN32
+    LOG_ERROR("HUP command is not supported on Windows.");
+    return 1;
+#else
     ::kill(*pid, SIGHUP);
     return 0;
+#endif
 }
 
 }  // namespace

@@ -409,21 +409,26 @@ LLMResponse LiteLLMProvider::Chat(
             LOG_ERROR("[llm] request failed: httplib error={}({})",
                       static_cast<int>(err),
                       err_text);
-            return LLMResponse{
-                .content = "Error calling LLM: request failed (httplib error=" + std::to_string(static_cast<int>(err)) +
-                    ", " + err_text + ")",
-                .finish_reason = "error"};
+            LLMResponse error_response{};
+            error_response.content = "Error calling LLM: request failed (httplib error=" + std::to_string(static_cast<int>(err)) +
+                ", " + err_text + ")";
+            error_response.finish_reason = "error";
+            return error_response;
         }
         if (response->status >= 400) {
             LOG_ERROR("[llm] HTTP {} body={}", response->status, response->body);
-            return LLMResponse{
-                .content = "Error calling LLM: HTTP " + std::to_string(response->status),
-                .finish_reason = "error"};
+            LLMResponse error_response{};
+            error_response.content = "Error calling LLM: HTTP " + std::to_string(response->status);
+            error_response.finish_reason = "error";
+            return error_response;
         }
 
         auto json = nlohmann::json::parse(response->body, nullptr, false);
         if (json.is_discarded()) {
-            return LLMResponse{.content = "Error calling LLM: invalid response", .finish_reason = "error"};
+            LLMResponse error_response{};
+            error_response.content = "Error calling LLM: invalid response";
+            error_response.finish_reason = "error";
+            return error_response;
         }
 
         LLMResponse parsed_response{};
@@ -473,7 +478,10 @@ LLMResponse LiteLLMProvider::Chat(
         }
 
         if (!json.contains("choices") || json["choices"].empty()) {
-            return LLMResponse{.content = "Error calling LLM: invalid response", .finish_reason = "error"};
+            LLMResponse error_response{};
+            error_response.content = "Error calling LLM: invalid response";
+            error_response.finish_reason = "error";
+            return error_response;
         }
 
         const auto& choice = json["choices"][0];
@@ -525,9 +533,10 @@ LLMResponse LiteLLMProvider::Chat(
 
         return parsed_response;
     } catch (const std::exception& ex) {
-        return LLMResponse{
-            .content = std::string("Error calling LLM: ") + ex.what(),
-            .finish_reason = "error"};
+        LLMResponse error_response{};
+        error_response.content = std::string("Error calling LLM: ") + ex.what();
+        error_response.finish_reason = "error";
+        return error_response;
     }
 }
 

@@ -1,6 +1,6 @@
 #include "sandbox/sandbox_executor.hpp"
 
-#include <boost/process/v1.hpp>
+#include <boost/process.hpp>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -8,17 +8,29 @@
 #include <sstream>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
+#include <system_error>
+#else
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 namespace kabot::sandbox {
-namespace bp = boost::process::v1;
+namespace bp = boost::process;
 
 ExecResult SandboxExecutor::Run(const std::string& command,
                                 const std::string& working_dir,
                                 std::chrono::seconds timeout) {
     ExecResult result{};
+#ifdef _WIN32
+    (void)command;
+    (void)working_dir;
+    (void)timeout;
+    result.exit_code = -1;
+    result.error = "SandboxExecutor is not supported on Windows";
+    return result;
+#else
     static const std::vector<std::string> kBlockedTokens = {
         "rm -rf",
         "rm -r",
@@ -120,7 +132,7 @@ ExecResult SandboxExecutor::Run(const std::string& command,
         } else if (result.exit_code == -1) {
             result.exit_code = 124;
         }
-    } catch (const boost::process::v1::process_error& ex) {
+    } catch (const boost::process::process_error& ex) {
         result.exit_code = -1;
         result.output = std::string("Error: exec failed: ") + ex.what();
     }
@@ -143,6 +155,7 @@ ExecResult SandboxExecutor::Run(const std::string& command,
     std::filesystem::remove(stdout_path, ec);
     std::filesystem::remove(stderr_path, ec);
     return result;
+#endif
 }
 
 }  // namespace kabot::sandbox

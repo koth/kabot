@@ -46,3 +46,131 @@ cron(action="add", message="Morning standup", cron_expr="0 9 * * 1-5", tz="Ameri
 cron(action="list")
 cron(action="remove", job_id="abc123")
 ```
+
+## Windows 编译
+
+### 环境要求
+
+- Windows 10/11
+- Visual Studio 2022 或 Build Tools 2022，安装 `Desktop development with C++`
+- CMake 3.20+
+- Git
+- PowerShell
+
+### 使用 vcpkg 初始化依赖
+
+先获取并初始化 vcpkg：
+
+```powershell
+git clone https://github.com/microsoft/vcpkg.git C:\dev\vcpkg
+C:\dev\vcpkg\bootstrap-vcpkg.bat
+```
+
+安装当前项目需要的依赖：
+
+```powershell
+C:\dev\vcpkg\vcpkg.exe install openssl curl sqlite3 boost-filesystem boost-system boost-process boost-beast boost-property-tree boost-algorithm boost-lexical-cast boost-variant --triplet x64-windows
+```
+
+如果启用了 Lark 渠道，需要 `Boost.Beast`。如果启用了 Telegram 渠道，`tgbot-cpp` 还会使用 `Boost.PropertyTree`、`Boost.Algorithm`、`Boost.LexicalCast`、`Boost.Variant`。上面的命令已包含这些依赖。
+
+### 配置项目
+
+当前仓库的 CMake 入口在 `src/` 目录，因此需要把 `src` 作为源码目录：
+
+```powershell
+cmake -S g:\work\kabot\src -B g:\work\kabot\build ^
+  -G "Visual Studio 17 2022" -A x64 ^
+  -DCMAKE_TOOLCHAIN_FILE=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake
+```
+
+如果你是在仓库根目录执行，也可以写成相对路径：
+
+```powershell
+cmake -S .\src -B .\build ^
+  -G "Visual Studio 17 2022" -A x64 ^
+  -DCMAKE_TOOLCHAIN_FILE=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake
+```
+
+如果你安装的是静态 triplet，配置时必须显式指定同一个 triplet：
+
+```powershell
+cmake -S .\src -B .\build ^
+  -G "Visual Studio 17 2022" -A x64 ^
+  -DCMAKE_TOOLCHAIN_FILE=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake ^
+  -DVCPKG_TARGET_TRIPLET=x64-windows-static
+```
+
+### 编译
+
+```powershell
+cmake --build g:\work\kabot\build --config Release
+```
+
+如果你在仓库根目录执行：
+
+```powershell
+cmake --build .\build --config Release
+```
+
+### 常见问题
+
+#### 1. 找不到 OpenSSL、CURL、SQLite3 或 Boost
+
+确认依赖已经通过 vcpkg 安装，并且 `CMAKE_TOOLCHAIN_FILE` 指向：
+
+```text
+C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake
+```
+
+如果报错缺少以下头文件，通常表示还没有安装对应的 Boost 子包：
+
+- `boost/beast/*` 对应 `boost-beast`
+- `boost/property_tree/*` 对应 `boost-property-tree`
+- `boost/algorithm/*` 对应 `boost-algorithm`
+- `boost/lexical_cast.hpp` 对应 `boost-lexical-cast`
+- `boost/variant.hpp` 对应 `boost-variant`
+
+#### 2. 生成器不匹配
+
+如果本机没有完整 Visual Studio 2022，可先确认以下命令可用：
+
+```powershell
+cmake --help
+```
+
+并检查生成器列表里是否包含：
+
+```text
+Visual Studio 17 2022
+```
+
+#### 3. 想使用静态库
+
+可改为安装静态 triplet：
+
+```powershell
+C:\dev\vcpkg\vcpkg.exe install openssl curl sqlite3 boost-filesystem boost-system boost-process boost-beast boost-property-tree boost-algorithm boost-lexical-cast boost-variant --triplet x64-windows-static
+```
+
+并在配置时加上：
+
+```powershell
+-DVCPKG_TARGET_TRIPLET=x64-windows-static
+```
+
+如果不传这个参数，CMake 通常会继续使用默认的 `x64-windows`，从而出现“依赖已经安装但编译时仍然找不到头文件或库”的问题。
+
+#### 4. 重新配置失败
+
+删除旧的 `build/` 目录后重新执行 `cmake -S ... -B ...`，避免缓存旧的工具链或依赖路径。
+
+### 最小可用流程
+
+```powershell
+git clone https://github.com/microsoft/vcpkg.git C:\dev\vcpkg
+C:\dev\vcpkg\bootstrap-vcpkg.bat
+C:\dev\vcpkg\vcpkg.exe install openssl curl sqlite3 boost-filesystem boost-system boost-process boost-beast boost-property-tree boost-algorithm boost-lexical-cast boost-variant --triplet x64-windows
+cmake -S .\src -B .\build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake --build .\build --config Release
+```

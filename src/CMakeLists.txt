@@ -6,6 +6,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  add_compile_options(/utf-8)
+endif()
+
+if(WIN32)
+  add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX)
+endif()
+
 include(FetchContent)
 
 # macOS: 自动查找 Homebrew 安装的 OpenSSL
@@ -86,6 +95,9 @@ endif()
 FetchContent_MakeAvailable(nlohmann_json httplib croncpp spdlog)
 if(KABOT_ENABLE_LARK)
   FetchContent_MakeAvailable(lark_cpp)
+  if(TARGET lark_cpp_example)
+    set_target_properties(lark_cpp_example PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
+  endif()
 endif()
 
 find_package(OpenSSL REQUIRED)
@@ -129,6 +141,8 @@ if(KABOT_ENABLE_TELEGRAM)
   
   if(TARGET TgBot)
     target_compile_definitions(TgBot PUBLIC
+      WIN32_LEAN_AND_MEAN
+      NOMINMAX
       BOOST_ASIO_ENABLE_DEPRECATED
       BOOST_ASIO_USE_TS_EXECUTOR_AS_DEFAULT)
     target_compile_definitions(TgBot PUBLIC HAVE_CURL)
@@ -213,6 +227,18 @@ add_library(kabot_tts STATIC
   sandbox/sandbox_executor.cpp
 )
 target_link_libraries(kabot_tts PRIVATE kabot_core)
+
+if(MSVC)
+  foreach(kabot_target kabot_cli kabot_tts)
+    set_property(TARGET ${kabot_target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endforeach()
+  if(TARGET TgBot)
+    set_property(TARGET TgBot PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
+  if(TARGET lark_cpp)
+    set_property(TARGET lark_cpp PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
+endif()
 
 add_executable(tts_test tts_test.cpp)
 target_link_libraries(tts_test PRIVATE kabot_core kabot_tts)
