@@ -205,7 +205,7 @@ bool TelegramChannel::Send(const kabot::bus::OutboundMessage& msg) {
     if (it_action != msg.metadata.end() && it_action->second == "typing") {
         if (!msg.chat_id.empty()) {
             try {
-                bot_->getApi().sendChatAction(std::stoll(msg.chat_id), "typing");
+                bot_->getApi().sendChatAction(static_cast<std::int64_t>(std::stoll(msg.chat_id)), "typing");
             } catch (const TgBot::TgException&) {
             } catch (const std::exception&) {
             }
@@ -232,11 +232,16 @@ bool TelegramChannel::Send(const kabot::bus::OutboundMessage& msg) {
     }
     const auto html = ConvertMarkdownToHtml(msg.content);
     try {
-        bot_->getApi().sendMessage(std::stoll(chat_id), html, false, reply_to_message_id, nullptr, "HTML");
+        bot_->getApi().sendMessage(static_cast<std::int64_t>(std::stoll(chat_id)),
+                                    html,
+                                    false,
+                                    static_cast<std::int64_t>(reply_to_message_id),
+                                    nullptr,
+                                    "HTML");
         return true;
     } catch (const TgBot::TgException&) {
         try {
-            bot_->getApi().sendMessage(std::stoll(chat_id), msg.content);
+            bot_->getApi().sendMessage(static_cast<std::int64_t>(std::stoll(chat_id)), msg.content);
             return true;
         } catch (const TgBot::TgException&) {
             return false;
@@ -245,7 +250,7 @@ bool TelegramChannel::Send(const kabot::bus::OutboundMessage& msg) {
         }
     } catch (const std::exception&) {
         try {
-            bot_->getApi().sendMessage(std::stoll(chat_id), msg.content);
+            bot_->getApi().sendMessage(static_cast<std::int64_t>(std::stoll(chat_id)), msg.content);
             return true;
         } catch (const TgBot::TgException&) {
             return false;

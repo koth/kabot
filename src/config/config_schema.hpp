@@ -29,6 +29,19 @@ struct LarkConfig {
     ChannelBindingConfig binding;
 };
 
+struct QQBotConfig {
+    std::string name = "qqbot";
+    bool enabled = false;
+    std::string app_id;
+    std::string client_secret;
+    std::string token;
+    bool sandbox = false;
+    std::string intents;
+    bool skip_tls_verify = false;
+    std::vector<std::string> allow_from;
+    ChannelBindingConfig binding;
+};
+
 struct ChannelInstanceConfig {
     std::string name;
     std::string type;
@@ -37,11 +50,13 @@ struct ChannelInstanceConfig {
     ChannelBindingConfig binding;
     TelegramConfig telegram;
     LarkConfig lark;
+    QQBotConfig qqbot;
 };
 
 struct ChannelsConfig {
     TelegramConfig telegram;
     LarkConfig lark;
+    QQBotConfig qqbot;
     std::vector<ChannelInstanceConfig> instances;
 };
 

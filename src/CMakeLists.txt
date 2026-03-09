@@ -57,6 +57,7 @@ endif()
 
 option(KABOT_ENABLE_TELEGRAM "Enable Telegram channel support" ON)
 option(KABOT_ENABLE_LARK "Enable Lark channel support" ON)
+option(KABOT_ENABLE_QQBOT "Enable QQBot channel support" ON)
 option(KABOT_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 
 
@@ -91,12 +92,31 @@ if(KABOT_ENABLE_LARK)
     GIT_TAG main
   )
 endif()
+if(KABOT_ENABLE_QQBOT)
+  FetchContent_Declare(
+    qqbot_cpp
+    GIT_REPOSITORY https://github.com/EastTower16/qqbot_cpp.git
+    GIT_TAG master
+  )
+endif()
 
 FetchContent_MakeAvailable(nlohmann_json httplib croncpp spdlog)
 if(KABOT_ENABLE_LARK)
   FetchContent_MakeAvailable(lark_cpp)
   if(TARGET lark_cpp_example)
     set_target_properties(lark_cpp_example PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
+  endif()
+endif()
+if(KABOT_ENABLE_QQBOT)
+  FetchContent_MakeAvailable(qqbot_cpp)
+  if(TARGET qqbot_sdk_smoke)
+    set_target_properties(qqbot_sdk_smoke PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
+  endif()
+  if(TARGET qqbot_sdk_api_example)
+    set_target_properties(qqbot_sdk_api_example PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
+  endif()
+  if(TARGET qqbot_sdk_message_reply_example)
+    set_target_properties(qqbot_sdk_message_reply_example PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   endif()
 endif()
 
@@ -136,6 +156,12 @@ if(KABOT_ENABLE_TELEGRAM)
     string(REPLACE "tcp::resolver::query query(url.host, \"443\");" "" BOOSTHTTPONLYSSLCLIENT_CPP_CONTENT "${BOOSTHTTPONLYSSLCLIENT_CPP_CONTENT}")
     string(REPLACE "connect(socket.lowest_layer(), resolver.resolve(query));" "connect(socket.lowest_layer(), resolver.resolve(url.host, \"443\"));" BOOSTHTTPONLYSSLCLIENT_CPP_CONTENT "${BOOSTHTTPONLYSSLCLIENT_CPP_CONTENT}")
     file(WRITE "${tgbotcpp_SOURCE_DIR}/src/net/BoostHttpOnlySslClient.cpp" "${BOOSTHTTPONLYSSLCLIENT_CPP_CONTENT}")
+
+    file(READ "${tgbotcpp_SOURCE_DIR}/include/tgbot/Api.h" TGBOT_API_H_CONTENT)
+    string(REPLACE "boost::variant<std::int64_t, std::string> chatId = 0," "boost::variant<std::int64_t, std::string> chatId = boost::variant<std::int64_t, std::string>()," TGBOT_API_H_CONTENT "${TGBOT_API_H_CONTENT}")
+    string(REPLACE "boost::variant<std::int64_t, std::string> chatId = boost::variant<std::int64_t, std::string>(static_cast<std::int64_t>(0))," "boost::variant<std::int64_t, std::string> chatId = boost::variant<std::int64_t, std::string>()," TGBOT_API_H_CONTENT "${TGBOT_API_H_CONTENT}")
+    string(REPLACE "boost::variant<std::int8_t, std::string> iconCustomEmojiId = 0" "boost::variant<std::int8_t, std::string> iconCustomEmojiId = boost::variant<std::int8_t, std::string>()" TGBOT_API_H_CONTENT "${TGBOT_API_H_CONTENT}")
+    file(WRITE "${tgbotcpp_SOURCE_DIR}/include/tgbot/Api.h" "${TGBOT_API_H_CONTENT}")
     message(STATUS "Patched tgbot-cpp for Boost compatibility")
   endif()
   
@@ -183,6 +209,9 @@ endif()
 if(KABOT_ENABLE_LARK)
   target_link_libraries(kabot_core INTERFACE lark_cpp)
 endif()
+if(KABOT_ENABLE_QQBOT)
+  target_link_libraries(kabot_core INTERFACE qqbot_sdk)
+endif()
 
 # 收集所有源文件
 set(KABOT_SOURCES
@@ -219,6 +248,9 @@ endif()
 if(KABOT_ENABLE_LARK)
   list(APPEND KABOT_SOURCES channels/lark_channel.cpp)
 endif()
+if(KABOT_ENABLE_QQBOT)
+  list(APPEND KABOT_SOURCES channels/qqbot_channel.cpp)
+endif()
 
 add_executable(kabot_cli ${KABOT_SOURCES})
 target_link_libraries(kabot_cli PRIVATE kabot_core)
@@ -238,6 +270,9 @@ if(MSVC)
   endif()
   if(TARGET lark_cpp)
     set_property(TARGET lark_cpp PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
+  if(TARGET qqbot_sdk)
+    set_property(TARGET qqbot_sdk PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   endif()
 endif()
 
@@ -281,6 +316,9 @@ endif()
 
 if(KABOT_ENABLE_TELEGRAM)
   target_link_libraries(kabot_cli PRIVATE TgBot)
+endif()
+if(KABOT_ENABLE_QQBOT)
+  target_link_libraries(kabot_cli PRIVATE qqbot_sdk)
 endif()
 
 # macOS: 设置 RPATH 以便找到动态库

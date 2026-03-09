@@ -166,6 +166,47 @@ void ApplyLarkConfig(LarkConfig& target, const nlohmann::json& source) {
     }
 }
 
+void ApplyQQBotConfig(QQBotConfig& target, const nlohmann::json& source) {
+    if (!source.is_object()) {
+        return;
+    }
+    if (source.contains("name") && source["name"].is_string()) {
+        target.name = source["name"].get<std::string>();
+    }
+    if (source.contains("enabled") && source["enabled"].is_boolean()) {
+        target.enabled = source["enabled"].get<bool>();
+    }
+    if (source.contains("appId") && source["appId"].is_string()) {
+        target.app_id = source["appId"].get<std::string>();
+    }
+    if (source.contains("clientSecret") && source["clientSecret"].is_string()) {
+        target.client_secret = source["clientSecret"].get<std::string>();
+    }
+    if (source.contains("token") && source["token"].is_string()) {
+        target.token = source["token"].get<std::string>();
+    }
+    if (source.contains("sandbox") && source["sandbox"].is_boolean()) {
+        target.sandbox = source["sandbox"].get<bool>();
+    }
+    if (source.contains("intents") && source["intents"].is_string()) {
+        target.intents = source["intents"].get<std::string>();
+    }
+    if (source.contains("skipTlsVerify") && source["skipTlsVerify"].is_boolean()) {
+        target.skip_tls_verify = source["skipTlsVerify"].get<bool>();
+    }
+    if (source.contains("allowFrom") && source["allowFrom"].is_array()) {
+        target.allow_from.clear();
+        for (const auto& item : source["allowFrom"]) {
+            if (item.is_string()) {
+                target.allow_from.push_back(item.get<std::string>());
+            }
+        }
+    }
+    if (source.contains("binding")) {
+        ApplyBindingConfig(target.binding, source["binding"]);
+    }
+}
+
 void NormalizeConfig(Config& config) {
     if (config.agents.instances.empty()) {
         AgentInstanceConfig agent{};
@@ -197,6 +238,17 @@ void NormalizeConfig(Config& config) {
             instance.lark.name = instance.name;
             config.channels.instances.push_back(instance);
         }
+        if (config.channels.qqbot.enabled) {
+            ChannelInstanceConfig instance{};
+            instance.name = config.channels.qqbot.name.empty() ? "qqbot" : config.channels.qqbot.name;
+            instance.type = "qqbot";
+            instance.enabled = config.channels.qqbot.enabled;
+            instance.allow_from = config.channels.qqbot.allow_from;
+            instance.binding = config.channels.qqbot.binding;
+            instance.qqbot = config.channels.qqbot;
+            instance.qqbot.name = instance.name;
+            config.channels.instances.push_back(instance);
+        }
     }
 
     for (auto& instance : config.channels.instances) {
@@ -220,6 +272,17 @@ void NormalizeConfig(Config& config) {
                 instance.binding = instance.lark.binding;
             }
             instance.enabled = instance.enabled && !instance.lark.app_id.empty() && !instance.lark.app_secret.empty();
+        } else if (instance.type == "qqbot") {
+            if (instance.name.empty()) {
+                instance.name = instance.qqbot.name.empty() ? "qqbot" : instance.qqbot.name;
+            }
+            instance.qqbot.name = instance.name;
+            instance.allow_from = instance.allow_from.empty() ? instance.qqbot.allow_from : instance.allow_from;
+            if (instance.binding.agent.empty()) {
+                instance.binding = instance.qqbot.binding;
+            }
+            instance.enabled = instance.enabled && !instance.qqbot.app_id.empty()
+                && (!instance.qqbot.client_secret.empty() || !instance.qqbot.token.empty());
         }
 
         if (instance.binding.agent.empty()) {
@@ -263,6 +326,9 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         if (channels.contains("lark") && channels["lark"].is_object()) {
             ApplyLarkConfig(config.channels.lark, channels["lark"]);
         }
+        if (channels.contains("qqbot") && channels["qqbot"].is_object()) {
+            ApplyQQBotConfig(config.channels.qqbot, channels["qqbot"]);
+        }
         if (channels.contains("instances") && channels["instances"].is_array()) {
             config.channels.instances.clear();
             for (const auto& item : channels["instances"]) {
@@ -295,6 +361,9 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
                 } else if (instance.type == "lark") {
                     instance.lark = config.channels.lark;
                     ApplyLarkConfig(instance.lark, item);
+                } else if (instance.type == "qqbot") {
+                    instance.qqbot = config.channels.qqbot;
+                    ApplyQQBotConfig(instance.qqbot, item);
                 }
                 config.channels.instances.push_back(instance);
             }
@@ -508,6 +577,49 @@ Config LoadConfig(const std::filesystem::path& config_path) {
     const auto lark_allow_from = GetEnv("KABOT_LARK_ALLOW_FROM");
     if (!lark_allow_from.empty()) {
         config.channels.lark.allow_from = SplitCsv(lark_allow_from);
+    }
+
+    const auto qqbot_enabled = GetEnv("KABOT_QQBOT_ENABLED");
+    if (!qqbot_enabled.empty()) {
+        config.channels.qqbot.enabled = ParseBool(qqbot_enabled);
+    }
+
+    const auto qqbot_app_id = GetEnv("KABOT_QQBOT_APP_ID");
+    if (!qqbot_app_id.empty()) {
+        config.channels.qqbot.app_id = qqbot_app_id;
+        config.channels.qqbot.enabled = true;
+    }
+
+    const auto qqbot_client_secret = GetEnv("KABOT_QQBOT_CLIENT_SECRET");
+    if (!qqbot_client_secret.empty()) {
+        config.channels.qqbot.client_secret = qqbot_client_secret;
+        config.channels.qqbot.enabled = true;
+    }
+
+    const auto qqbot_token = GetEnv("KABOT_QQBOT_TOKEN");
+    if (!qqbot_token.empty()) {
+        config.channels.qqbot.token = qqbot_token;
+        config.channels.qqbot.enabled = true;
+    }
+
+    const auto qqbot_sandbox = GetEnv("KABOT_QQBOT_SANDBOX");
+    if (!qqbot_sandbox.empty()) {
+        config.channels.qqbot.sandbox = ParseBool(qqbot_sandbox);
+    }
+
+    const auto qqbot_intents = GetEnv("KABOT_QQBOT_INTENTS");
+    if (!qqbot_intents.empty()) {
+        config.channels.qqbot.intents = qqbot_intents;
+    }
+
+    const auto qqbot_skip_tls_verify = GetEnv("KABOT_QQBOT_SKIP_TLS_VERIFY");
+    if (!qqbot_skip_tls_verify.empty()) {
+        config.channels.qqbot.skip_tls_verify = ParseBool(qqbot_skip_tls_verify);
+    }
+
+    const auto qqbot_allow_from = GetEnv("KABOT_QQBOT_ALLOW_FROM");
+    if (!qqbot_allow_from.empty()) {
+        config.channels.qqbot.allow_from = SplitCsv(qqbot_allow_from);
     }
 
     const auto openrouter_key = GetEnvFallback(
@@ -784,8 +896,16 @@ std::vector<std::string> ValidateConfig(const Config& config) {
         } else if (!channel_names.insert(channel.name).second) {
             errors.push_back("duplicate channel instance name: " + channel.name);
         }
-        if (channel.type != "telegram" && channel.type != "lark") {
+        if (channel.type != "telegram" && channel.type != "lark" && channel.type != "qqbot") {
             errors.push_back("unsupported channel type for instance " + channel.name + ": " + channel.type);
+        }
+        if (channel.type == "qqbot") {
+            if (channel.qqbot.app_id.empty()) {
+                errors.push_back("qqbot channel instance " + channel.name + " is missing appId");
+            }
+            if (channel.qqbot.client_secret.empty() && channel.qqbot.token.empty()) {
+                errors.push_back("qqbot channel instance " + channel.name + " requires clientSecret or token");
+            }
         }
         if (channel.binding.agent.empty()) {
             errors.push_back("channel instance has no bound agent: " + channel.name);

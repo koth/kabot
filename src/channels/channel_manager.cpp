@@ -4,6 +4,7 @@
 #include <thread>
 
 #include "channels/lark_channel.hpp"
+#include "channels/qqbot_channel.hpp"
 #include "channels/telegram_channel.hpp"
 #include "utils/logging.hpp"
 
@@ -127,6 +128,8 @@ void ChannelManager::RegisterInstance(const kabot::config::ChannelInstanceConfig
         Register(std::make_unique<TelegramChannel>(config.telegram, bus_));
     } else if (config.type == "lark") {
         Register(std::make_unique<LarkChannel>(config.lark, bus_));
+    } else if (config.type == "qqbot") {
+        Register(std::make_unique<QQBotChannel>(config.qqbot, bus_));
     }
 }
 

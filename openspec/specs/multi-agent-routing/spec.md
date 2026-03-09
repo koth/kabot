@@ -31,14 +31,14 @@ The system SHALL allow each configured agent instance to declare a supported too
 - **THEN** startup fails with a validation error that identifies the agent instance and invalid tool profile
 
 ### Requirement: Support multiple channel instances
-The system SHALL support configuring multiple named channel instances, including multiple instances of the same channel type, within a single process.
+The system SHALL support configuring multiple named channel instances, including multiple instances of the same channel type, within a single process. Supported channel types MUST include `telegram`, `lark`, and `qqbot`.
 
 #### Scenario: Start multiple channel instances of the same type
 - **WHEN** the configuration defines two Telegram channel instances with different names and credentials
 - **THEN** the system starts both instances and keeps them addressable by their configured instance names
 
 #### Scenario: Start multiple channel types together
-- **WHEN** the configuration defines Telegram and Lark channel instances at the same time
+- **WHEN** the configuration defines Telegram, Lark, and QQBot channel instances at the same time
 - **THEN** the system starts all enabled instances in one runtime
 
 ### Requirement: Bind a channel instance to exactly one agent

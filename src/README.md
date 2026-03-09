@@ -175,6 +175,28 @@ cmake -S .\src -B .\build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FI
 cmake --build .\build --config Release
 ```
 
+### QQBot 依赖与启用
+
+当前 `KABOT_ENABLE_QQBOT` 默认开启，CMake 会通过 `FetchContent` 拉取 `qqbot_cpp`，并生成 `qqbot_sdk` 静态库。
+
+如果你使用静态 triplet，建议继续使用：
+
+```powershell
+cmake -S .\src -B .\build ^
+  -G "Visual Studio 17 2022" -A x64 ^
+  -DCMAKE_TOOLCHAIN_FILE=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake ^
+  -DVCPKG_TARGET_TRIPLET=x64-windows-static ^
+  -DKABOT_ENABLE_QQBOT=ON
+```
+
+QQBot 依赖与现有工程一致，主要仍然依赖：
+
+- `openssl`
+- `curl`
+- `nlohmann-json`
+
+`qqbot_cpp` 在 Windows + OpenSSL 环境下如果遇到 TLS 握手问题，可以通过配置 `skipTlsVerify` 临时排查，但不建议在生产环境长期启用。
+
 ## 多 agent / 多 channel instance 配置
 
 当前推荐的运行模型是：
@@ -228,6 +250,19 @@ cmake --build .\build --config Release
         "binding": {
           "agent": "sales-agent"
         }
+      },
+      {
+        "name": "qqbot_ops",
+        "type": "qqbot",
+        "enabled": true,
+        "appId": "<qqbot-app-id>",
+        "clientSecret": "<qqbot-client-secret>",
+        "sandbox": true,
+        "intents": "1107296256",
+        "allowFrom": ["group-openid", "user-openid"],
+        "binding": {
+          "agent": "ops-agent"
+        }
       }
     ]
   }
@@ -260,3 +295,44 @@ cmake --build .\build --config Release
 - `binding.agent`
 
 如果 `binding.agent` 缺失，或引用了不存在的 agent，启动会直接失败。
+
+## QQBot 配置说明
+
+当前支持两种 QQBot 配置入口：
+
+- 旧式单实例：`channels.qqbot`
+- 新式多实例：`channels.instances[*]` 配合 `type: "qqbot"`
+
+当前 QQBot 配置字段包括：
+
+- `appId`
+- `clientSecret`
+- `token`
+- `sandbox`
+- `intents`
+- `skipTlsVerify`
+- `allowFrom`
+- `binding.agent`
+
+其中：
+
+- `appId` 必填
+- `clientSecret` 和 `token` 至少提供一个
+- 未显式配置 `intents` 时，运行时会使用 `qqbot_cpp` 的消息回复示例默认值
+
+## QQBot 支持范围与限制
+
+当前 QQBot 渠道实现支持：
+
+- 频道消息 `MESSAGE_CREATE` / `AT_MESSAGE_CREATE`
+- 私信消息 `DIRECT_MESSAGE_CREATE`
+- C2C 消息 `C2C_MESSAGE_CREATE`
+- 群消息 `GROUP_AT_MESSAGE_CREATE` / `GROUP_MSG_RECEIVE`
+- 纯文本回复发送
+- 基于 `reply_to` / `chat_id` 的会话目标回填
+
+当前已知限制：
+
+- 只做了文本消息归一化，附件暂未映射到统一媒体下载链路
+- outbound 目前只覆盖文本发送，不包含 QQBot 富媒体上传
+- `allowFrom` 目前按 sender/chat 标识字符串精确匹配，不做更复杂的权限模型

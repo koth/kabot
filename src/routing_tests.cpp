@@ -71,6 +71,17 @@ kabot::config::Config BuildConfig() {
     lark.lark.app_secret = "app-secret";
     config.channels.instances.push_back(lark);
 
+    kabot::config::ChannelInstanceConfig qqbot{};
+    qqbot.name = "qqbot_ops";
+    qqbot.type = "qqbot";
+    qqbot.enabled = true;
+    qqbot.binding.agent = "ops-agent";
+    qqbot.qqbot.name = qqbot.name;
+    qqbot.qqbot.enabled = true;
+    qqbot.qqbot.app_id = "qq-app-id";
+    qqbot.qqbot.client_secret = "qq-client-secret";
+    config.channels.instances.push_back(qqbot);
+
     return config;
 }
 
@@ -87,6 +98,21 @@ void TestResolveAgentNameFromBindingAgent() {
 
     const auto resolved = registry.ResolveAgentName(msg);
     Expect(resolved == "ops-agent", "expected channel binding.agent to resolve ops-agent");
+}
+
+void TestResolveAgentNameFromQQBotBindingAgent() {
+    kabot::bus::MessageBus bus;
+    StubProvider provider;
+    const auto config = BuildConfig();
+    kabot::agent::AgentRegistry registry(bus, provider, config, nullptr);
+
+    kabot::bus::InboundMessage msg{};
+    msg.channel = "qqbot";
+    msg.channel_instance = "qqbot_ops";
+    msg.chat_id = "group-openid-1";
+
+    const auto resolved = registry.ResolveAgentName(msg);
+    Expect(resolved == "ops-agent", "expected qqbot binding.agent to resolve ops-agent");
 }
 
 void TestResolveAgentNameFromExplicitMetadataOverride() {
@@ -190,6 +216,7 @@ void TestMessageOnlyToolProfileRegistersOnlyMessageTool() {
 
 int main() {
     TestResolveAgentNameFromBindingAgent();
+    TestResolveAgentNameFromQQBotBindingAgent();
     TestResolveAgentNameFromExplicitMetadataOverride();
     TestSessionKeyIsolation();
     TestHandleInboundPreservesRoutingFields();

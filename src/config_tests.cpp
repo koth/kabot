@@ -100,6 +100,92 @@ void TestValidateConfigRejectsUnsupportedToolProfile() {
     Expect(!errors.empty(), "expected unsupported toolProfile to fail validation");
 }
 
+void TestValidateConfigAcceptsQQBotChannel() {
+    kabot::config::Config config{};
+
+    kabot::config::AgentInstanceConfig agent{};
+    agent.name = "ops-agent";
+    config.agents.instances.push_back(agent);
+
+    kabot::config::ChannelInstanceConfig channel{};
+    channel.name = "qq_ops";
+    channel.type = "qqbot";
+    channel.enabled = true;
+    channel.binding.agent = "ops-agent";
+    channel.qqbot.name = channel.name;
+    channel.qqbot.enabled = true;
+    channel.qqbot.app_id = "app-id";
+    channel.qqbot.client_secret = "client-secret";
+    config.channels.instances.push_back(channel);
+
+    const auto errors = kabot::config::ValidateConfig(config);
+    Expect(errors.empty(), "expected qqbot config to validate successfully");
+}
+
+void TestValidateConfigRejectsQQBotChannelMissingCredentials() {
+    kabot::config::Config config{};
+
+    kabot::config::AgentInstanceConfig agent{};
+    agent.name = "ops-agent";
+    config.agents.instances.push_back(agent);
+
+    kabot::config::ChannelInstanceConfig channel{};
+    channel.name = "qq_ops";
+    channel.type = "qqbot";
+    channel.enabled = true;
+    channel.binding.agent = "ops-agent";
+    channel.qqbot.name = channel.name;
+    channel.qqbot.enabled = true;
+    channel.qqbot.app_id = "app-id";
+    config.channels.instances.push_back(channel);
+
+    const auto errors = kabot::config::ValidateConfig(config);
+    Expect(!errors.empty(), "expected qqbot config without credentials to fail validation");
+}
+
+void TestLoadConfigParsesQQBotInstance() {
+    const auto temp_dir = std::filesystem::temp_directory_path() / "kabot_config_tests_qqbot";
+    std::filesystem::create_directories(temp_dir);
+    const auto config_path = temp_dir / "config.json";
+
+    std::ofstream output(config_path);
+    output << R"({
+  "agents": {
+    "instances": [
+      {
+        "name": "ops-agent"
+      }
+    ]
+  },
+  "channels": {
+    "instances": [
+      {
+        "name": "qq_ops",
+        "type": "qqbot",
+        "enabled": true,
+        "appId": "app-id",
+        "clientSecret": "client-secret",
+        "sandbox": true,
+        "intents": "1107296256",
+        "skipTlsVerify": true,
+        "binding": {
+          "agent": "ops-agent"
+        }
+      }
+    ]
+  }
+})";
+    output.close();
+
+    const auto config = kabot::config::LoadConfig(config_path);
+    Expect(config.channels.instances.size() == 1, "expected one qqbot channel instance");
+    Expect(config.channels.instances.front().type == "qqbot", "expected qqbot channel type to load");
+    Expect(config.channels.instances.front().qqbot.app_id == "app-id", "expected qqbot appId to load");
+    Expect(config.channels.instances.front().qqbot.client_secret == "client-secret", "expected qqbot clientSecret to load");
+    Expect(config.channels.instances.front().qqbot.sandbox, "expected qqbot sandbox to load");
+    Expect(config.channels.instances.front().qqbot.skip_tls_verify, "expected qqbot skipTlsVerify to load");
+}
+
 void TestLegacyConfigCompatibility() {
     const auto temp_dir = std::filesystem::temp_directory_path() / "kabot_config_tests";
     std::filesystem::create_directories(temp_dir);
@@ -139,6 +225,9 @@ int main() {
     TestValidateConfigRejectsMissingBindingAgent();
     TestValidateConfigRejectsUnknownBindingAgent();
     TestValidateConfigRejectsUnsupportedToolProfile();
+    TestValidateConfigAcceptsQQBotChannel();
+    TestValidateConfigRejectsQQBotChannelMissingCredentials();
+    TestLoadConfigParsesQQBotInstance();
     TestLegacyConfigCompatibility();
     std::cout << "config_tests passed" << std::endl;
     return 0;
