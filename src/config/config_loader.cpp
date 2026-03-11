@@ -331,6 +331,19 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         return;
     }
 
+    if (data.contains("tools") && data["tools"].is_object()) {
+        const auto& tools = data["tools"];
+        if (tools.contains("web") && tools["web"].is_object()) {
+            const auto& web = tools["web"];
+            if (web.contains("search") && web["search"].is_object()) {
+                const auto& search = web["search"];
+                if (search.contains("apiKey") && search["apiKey"].is_string()) {
+                    config.agents.defaults.brave_api_key = search["apiKey"].get<std::string>();
+                }
+            }
+        }
+    }
+
     if (data.contains("agents") && data["agents"].is_object()) {
         const auto& agents = data["agents"];
         if (agents.contains("defaults") && agents["defaults"].is_object()) {
@@ -496,18 +509,6 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         }
     }
 
-    if (data.contains("tools") && data["tools"].is_object()) {
-        const auto& tools = data["tools"];
-        if (tools.contains("web") && tools["web"].is_object()) {
-            const auto& web = tools["web"];
-            if (web.contains("search") && web["search"].is_object()) {
-                const auto& search = web["search"];
-                if (search.contains("apiKey") && search["apiKey"].is_string()) {
-                    config.agents.defaults.brave_api_key = search["apiKey"].get<std::string>();
-                }
-            }
-        }
-    }
 }
 
 bool ParseBool(const std::string& value) {
