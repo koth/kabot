@@ -306,7 +306,7 @@ void QQBotChannel::HandleChannelEvent(const std::string& event_name, const std::
     std::unordered_map<std::string, std::string> metadata;
     metadata["event_name"] = event_name;
     const auto sender_id = JsonString(author, {"id", "user_openid", "username"});
-    PublishMessage(sender_id, target.chat_id, JsonString(json, {"content"}), std::move(metadata), std::move(target));
+    PublishMessage(sender_id, target.chat_id, JsonString(json, {"content"}), std::move(metadata), target);
 }
 
 void QQBotChannel::HandleDirectEvent(const std::string& event_name, const std::string& payload) {
@@ -333,7 +333,7 @@ void QQBotChannel::HandleDirectEvent(const std::string& event_name, const std::s
     std::unordered_map<std::string, std::string> metadata;
     metadata["event_name"] = event_name;
     const auto sender_id = JsonString(author, {"id", "user_openid", "username"});
-    PublishMessage(sender_id, target.chat_id, JsonString(json, {"content"}), std::move(metadata), std::move(target));
+    PublishMessage(sender_id, target.chat_id, JsonString(json, {"content"}), std::move(metadata), target);
 }
 
 void QQBotChannel::HandleC2CEvent(const std::string& event_name, const std::string& payload) {
@@ -357,7 +357,7 @@ void QQBotChannel::HandleC2CEvent(const std::string& event_name, const std::stri
 
     std::unordered_map<std::string, std::string> metadata;
     metadata["event_name"] = event_name;
-    PublishMessage(target.user_openid, target.chat_id, JsonString(json, {"content"}), std::move(metadata), std::move(target));
+    PublishMessage(target.user_openid, target.chat_id, JsonString(json, {"content"}), std::move(metadata), target);
 }
 
 void QQBotChannel::HandleGroupEvent(const std::string& event_name, const std::string& payload) {
@@ -382,7 +382,7 @@ void QQBotChannel::HandleGroupEvent(const std::string& event_name, const std::st
     std::unordered_map<std::string, std::string> metadata;
     metadata["event_name"] = event_name;
     const auto sender_id = JsonString(author, {"member_openid", "user_openid", "id"});
-    PublishMessage(sender_id, target.chat_id, JsonString(json, {"content"}), std::move(metadata), std::move(target));
+    PublishMessage(sender_id, target.chat_id, JsonString(json, {"content"}), std::move(metadata), target);
 }
 
 void QQBotChannel::HandleGatewayEvent(const std::string& event_name, const std::string& payload) {
