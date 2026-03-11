@@ -76,6 +76,14 @@ std::unordered_map<std::string, bool> ChannelManager::Status() const {
 }
 
 bool ChannelManager::SendWithRetry(const kabot::bus::OutboundMessage& msg) {
+    if (msg.content.empty() && msg.media.empty()) {
+        LOG_WARN("[channel] skip empty outbound message channel={} chat_id={} reply_to={}",
+                 msg.channel_instance.empty() ? msg.channel : msg.channel_instance,
+                 msg.chat_id,
+                 msg.reply_to);
+        return true;
+    }
+
     const auto& channel_name = msg.channel_instance.empty() ? msg.channel : msg.channel_instance;
     auto channel = GetChannel(channel_name);
     if (!channel) {

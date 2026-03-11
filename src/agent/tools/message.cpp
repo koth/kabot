@@ -30,12 +30,14 @@ std::string MessageTool::Execute(const std::unordered_map<std::string, std::stri
     const auto content = GetParam(params, "content");
     const auto media_raw = GetParam(params, "media");
 
-    const auto channel = GetParam(params, "channel");
-    const auto chat_id = GetParam(params, "chat_id");
+    const auto requested_channel = GetParam(params, "channel");
+    const auto requested_chat_id = GetParam(params, "chat_id");
+
+    const bool has_explicit_target = !requested_channel.empty() && !requested_chat_id.empty();
 
     kabot::bus::OutboundMessage msg{};
-    msg.channel = channel.empty() ? default_channel_ : channel;
-    msg.chat_id = chat_id.empty() ? default_chat_id_ : chat_id;
+    msg.channel = has_explicit_target ? requested_channel : default_channel_;
+    msg.chat_id = has_explicit_target ? requested_chat_id : default_chat_id_;
     msg.content = content;
 
     if (!media_raw.empty()) {
