@@ -3,6 +3,8 @@
 #include <chrono>
 #include <utility>
 
+#include "utils/logging.hpp"
+
 namespace kabot::agent {
 namespace {
 
@@ -26,6 +28,20 @@ AgentRegistry::AgentRegistry(kabot::bus::MessageBus& bus,
 void AgentRegistry::InitAgents() {
     agents_.clear();
     for (const auto& agent_config : config_.agents.instances) {
+        if (agent_config.brave_api_key.empty()) {
+            LOG_WARN("[agent] init name={} workspace={} brave_api_key=empty",
+                     agent_config.name,
+                     agent_config.workspace);
+        } else {
+            const auto size = agent_config.brave_api_key.size();
+            const auto prefix = size > 4
+                ? agent_config.brave_api_key.substr(0, 4)
+                : agent_config.brave_api_key;
+            LOG_INFO("[agent] init name={} workspace={} brave_api_key={}***",
+                     agent_config.name,
+                     agent_config.workspace,
+                     prefix);
+        }
         agents_.emplace(
             agent_config.name,
             std::make_unique<AgentLoop>(
