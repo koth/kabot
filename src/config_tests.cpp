@@ -218,6 +218,47 @@ void TestLegacyConfigCompatibility() {
     Expect(config.channels.instances.front().binding.agent == "default", "expected legacy channel to bind default agent");
 }
 
+void TestAgentInstancesInheritRuntimeDefaults() {
+    const auto temp_dir = std::filesystem::temp_directory_path() / "kabot_config_tests_agent_defaults";
+    std::filesystem::create_directories(temp_dir);
+    const auto config_path = temp_dir / "config.json";
+
+    std::ofstream output(config_path);
+    output << R"({
+  "agents": {
+    "defaults": {
+      "workspace": "json-workspace",
+      "model": "json-model",
+      "toolProfile": "full",
+      "maxIterations": 20,
+      "maxTokens": 8192,
+      "temperature": 0.7,
+      "maxToolIterations": 20,
+      "maxHistoryMessages": 50
+    },
+    "instances": [
+      {
+        "name": "ops-agent"
+      }
+    ]
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "test-brave-key"
+      }
+    }
+  }
+})";
+    output.close();
+
+    const auto config = kabot::config::LoadConfig(config_path);
+    Expect(config.agents.instances.size() == 1, "expected one agent instance");
+    Expect(config.agents.instances.front().name == "ops-agent", "expected ops-agent instance name");
+    Expect(config.agents.instances.front().brave_api_key == "test-brave-key",
+           "expected runtime brave api key to be inherited by agent instance");
+}
+
 }  // namespace
 
 int main() {
@@ -229,6 +270,7 @@ int main() {
     TestValidateConfigRejectsQQBotChannelMissingCredentials();
     TestLoadConfigParsesQQBotInstance();
     TestLegacyConfigCompatibility();
+    TestAgentInstancesInheritRuntimeDefaults();
     std::cout << "config_tests passed" << std::endl;
     return 0;
 }

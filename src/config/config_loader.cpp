@@ -43,6 +43,38 @@ std::filesystem::path GetConfigPath() {
     return GetHomePath() / ".kabot" / "config.json";
 }
 
+void ApplyRuntimeAgentDefaults(AgentInstanceConfig& agent,
+                               const AgentDefaults& previous_defaults,
+                               const AgentDefaults& current_defaults) {
+    if (agent.workspace == previous_defaults.workspace) {
+        agent.workspace = current_defaults.workspace;
+    }
+    if (agent.model == previous_defaults.model) {
+        agent.model = current_defaults.model;
+    }
+    if (agent.tool_profile == previous_defaults.tool_profile) {
+        agent.tool_profile = current_defaults.tool_profile;
+    }
+    if (agent.brave_api_key == previous_defaults.brave_api_key) {
+        agent.brave_api_key = current_defaults.brave_api_key;
+    }
+    if (agent.max_iterations == previous_defaults.max_iterations) {
+        agent.max_iterations = current_defaults.max_iterations;
+    }
+    if (agent.max_tokens == previous_defaults.max_tokens) {
+        agent.max_tokens = current_defaults.max_tokens;
+    }
+    if (agent.temperature == previous_defaults.temperature) {
+        agent.temperature = current_defaults.temperature;
+    }
+    if (agent.max_tool_iterations == previous_defaults.max_tool_iterations) {
+        agent.max_tool_iterations = current_defaults.max_tool_iterations;
+    }
+    if (agent.max_history_messages == previous_defaults.max_history_messages) {
+        agent.max_history_messages = current_defaults.max_history_messages;
+    }
+}
+
 void ApplyProviderConfig(ProviderConfig& target, const nlohmann::json& source) {
     if (!source.is_object()) {
         return;
@@ -207,12 +239,15 @@ void ApplyQQBotConfig(QQBotConfig& target, const nlohmann::json& source) {
     }
 }
 
-void NormalizeConfig(Config& config) {
+void NormalizeConfig(Config& config, const AgentDefaults& previous_defaults) {
     if (config.agents.instances.empty()) {
         AgentInstanceConfig agent{};
         static_cast<AgentDefaults&>(agent) = config.agents.defaults;
         agent.name = "default";
         config.agents.instances.push_back(agent);
+    }
+    for (auto& agent : config.agents.instances) {
+        ApplyRuntimeAgentDefaults(agent, previous_defaults, config.agents.defaults);
     }
 
     if (config.channels.instances.empty()) {
@@ -530,6 +565,8 @@ Config LoadConfig(const std::filesystem::path& config_path) {
             // Keep defaults on parse errors
         }
     }
+
+    const auto json_agent_defaults = config.agents.defaults;
 
     const auto telegram_enabled = GetEnv("KABOT_TELEGRAM_ENABLED");
     if (!telegram_enabled.empty()) {
@@ -868,7 +905,7 @@ Config LoadConfig(const std::filesystem::path& config_path) {
             config.heartbeat.cron_http_port);
     }
 
-    NormalizeConfig(config);
+    NormalizeConfig(config, json_agent_defaults);
 
     return config;
 }
