@@ -30,6 +30,20 @@ std::string ContextBuilder::BuildSystemPrompt(
     oss << "# kabot\n\n";
     oss << "## Workspace\n";
     oss << "Your workspace is at: " << workspace_ << "\n\n";
+#if defined(_WIN32)
+    oss << "## Execution Environment\n";
+    oss << "Host OS: Windows\n";
+    oss << "Command executor: cmd.exe /C\n";
+    oss << "When generating commands for shell-like tools, prefer Windows cmd-compatible syntax.\n";
+    oss << "Do not assume bash, zsh, or other Unix shell syntax.\n";
+    oss << "Do not use PowerShell-only syntax unless you explicitly invoke powershell -Command.\n\n";
+#else
+    oss << "## Execution Environment\n";
+    oss << "Host OS: Unix-like\n";
+    oss << "Command executor: /bin/sh -c\n";
+    oss << "When generating commands for shell-like tools, prefer POSIX shell syntax.\n";
+    oss << "Do not assume PowerShell syntax.\n\n";
+#endif
     const auto now = std::chrono::system_clock::now();
     const auto now_time = std::chrono::system_clock::to_time_t(now);
     std::tm now_tm{};

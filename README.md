@@ -79,9 +79,7 @@ C:\dev\vcpkg\vcpkg.exe install openssl curl sqlite3 boost-filesystem boost-syste
 当前仓库的 CMake 入口在 `src/` 目录，因此需要把 `src` 作为源码目录：
 
 ```powershell
-cmake -S g:\work\kabot\src -B g:\work\kabot\build ^
-  -G "Visual Studio 17 2022" -A x64 ^
-  -DCMAKE_TOOLCHAIN_FILE=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake -S g:\work\kabot\src -B g:\work\kabot\build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake
 ```
 
 如果你是在仓库根目录执行，也可以写成相对路径：

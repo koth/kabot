@@ -310,6 +310,13 @@ add_executable(routing_tests
 )
 target_link_libraries(routing_tests PRIVATE kabot_core)
 
+add_executable(sandbox_tests
+  sandbox_tests.cpp
+  agent/tools/shell.cpp
+  sandbox/sandbox_executor.cpp
+)
+target_link_libraries(sandbox_tests PRIVATE kabot_core)
+
 if(APPLE)
   target_link_options(kabot_cli PRIVATE "-Wl,-no_warn_duplicate_libraries")
 endif()

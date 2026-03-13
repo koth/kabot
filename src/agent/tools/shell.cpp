@@ -17,11 +17,15 @@ std::string ExecTool::Execute(const std::unordered_map<std::string, std::string>
     if (it == params.end() || it->second.empty()) {
         return "Error: missing command";
     }
+
     const auto result = kabot::sandbox::SandboxExecutor::Run(
         it->second,
         working_dir_,
         std::chrono::seconds(180));
 
+    if (result.blocked) {
+        return result.error.empty() ? "Error: command blocked by policy" : result.error;
+    }
     if (result.timed_out) {
         return "Error: command timed out";
     }

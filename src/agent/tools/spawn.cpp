@@ -33,6 +33,9 @@ std::string SpawnTool::Execute(const std::unordered_map<std::string, std::string
                  (result.timed_out ? "true" : "false"),
                  (result.blocked ? "true" : "false"),
                  result.output);
+        if (!result.error.empty()) {
+            LOG_WARN("[spawn] label={} stderr=\n{}", label, result.error);
+        }
     }).detach();
 
     return "Spawned task: " + label;

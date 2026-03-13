@@ -2,12 +2,15 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <array>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <sstream>
 #include <thread>
 #include <vector>
 #ifdef _WIN32
+#include <windows.h>
 #include <system_error>
 #else
 #include <cerrno>
@@ -20,46 +23,190 @@
 
 namespace kabot::sandbox {
 
+namespace {
+
+constexpr int kBlockedExitCode = 126;
+constexpr int kTimedOutExitCode = 124;
+
+const std::array<const char*, 13> kBlockedTokens = {
+    "rm -rf",
+    "rm -r",
+    "shutdown",
+    "reboot",
+    "mkfs",
+    "dd ",
+    ":(){:|:&};:",
+    "sudo ",
+    "su ",
+    "kill -9",
+    "killall",
+    "chmod 777",
+    "chown"
+};
+
+const std::array<const char*, 2> kBlockedPipes = {
+    "curl | sh",
+    "wget | sh"
+};
+
+bool IsBlockedCommand(const std::string& command) {
+    for (const auto* token : kBlockedTokens) {
+        if (command.find(token) != std::string::npos) {
+            return true;
+        }
+    }
+    for (const auto* token : kBlockedPipes) {
+        if (command.find(token) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string BuildTempLogPath(const char* prefix, const char* suffix) {
+    const auto stamp = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    return (std::filesystem::temp_directory_path() / (std::string(prefix) + stamp + suffix)).string();
+}
+
+void ReadFileToString(const std::filesystem::path& path, std::string& target) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        return;
+    }
+    std::ostringstream stream;
+    stream << input.rdbuf();
+    target = stream.str();
+}
+
+void CleanupLogFiles(const std::filesystem::path& stdout_path,
+                     const std::filesystem::path& stderr_path) {
+    std::error_code ec;
+    std::filesystem::remove(stdout_path, ec);
+    std::filesystem::remove(stderr_path, ec);
+}
+
+void PopulateCapturedOutput(const std::filesystem::path& stdout_path,
+                            const std::filesystem::path& stderr_path,
+                            ExecResult& result) {
+    ReadFileToString(stdout_path, result.output);
+    ReadFileToString(stderr_path, result.error);
+}
+
+} // namespace
+
 ExecResult SandboxExecutor::Run(const std::string& command,
                                 const std::string& working_dir,
                                 std::chrono::seconds timeout) {
     ExecResult result{};
+    if (IsBlockedCommand(command)) {
+        result.exit_code = kBlockedExitCode;
+        result.blocked = true;
+        result.error = "Error: command blocked by policy";
+        return result;
+    }
+
+    const auto stdout_path = std::filesystem::path(BuildTempLogPath("kabot_stdout_", ".log"));
+    const auto stderr_path = std::filesystem::path(BuildTempLogPath("kabot_stderr_", ".log"));
+
 #ifdef _WIN32
-    (void)command;
-    (void)working_dir;
-    (void)timeout;
-    result.exit_code = -1;
-    result.error = "SandboxExecutor is not supported on Windows";
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.lpSecurityDescriptor = nullptr;
+    sa.bInheritHandle = TRUE;
+
+    HANDLE stdout_handle = ::CreateFileA(
+        stdout_path.string().c_str(),
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &sa,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (stdout_handle == INVALID_HANDLE_VALUE) {
+        result.exit_code = -1;
+        result.error = "Error: failed to open stdout log";
+        return result;
+    }
+
+    HANDLE stderr_handle = ::CreateFileA(
+        stderr_path.string().c_str(),
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &sa,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (stderr_handle == INVALID_HANDLE_VALUE) {
+        ::CloseHandle(stdout_handle);
+        CleanupLogFiles(stdout_path, stderr_path);
+        result.exit_code = -1;
+        result.error = "Error: failed to open stderr log";
+        return result;
+    }
+
+    STARTUPINFOA startup_info{};
+    startup_info.cb = sizeof(startup_info);
+    startup_info.dwFlags = STARTF_USESTDHANDLES;
+    startup_info.hStdInput = ::GetStdHandle(STD_INPUT_HANDLE);
+    startup_info.hStdOutput = stdout_handle;
+    startup_info.hStdError = stderr_handle;
+
+    PROCESS_INFORMATION process_info{};
+    std::string command_line = std::string("cmd.exe /C ") + command;
+    std::vector<char> command_buffer(command_line.begin(), command_line.end());
+    command_buffer.push_back('\0');
+
+    const BOOL created = ::CreateProcessA(
+        nullptr,
+        command_buffer.data(),
+        nullptr,
+        nullptr,
+        TRUE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        working_dir.empty() ? nullptr : working_dir.c_str(),
+        &startup_info,
+        &process_info);
+
+    ::CloseHandle(stdout_handle);
+    ::CloseHandle(stderr_handle);
+
+    if (!created) {
+        CleanupLogFiles(stdout_path, stderr_path);
+        result.exit_code = -1;
+        result.error = "Error: exec failed";
+        return result;
+    }
+
+    const auto timeout_ms = timeout.count() <= 0
+        ? 0UL
+        : static_cast<unsigned long>(timeout.count() * 1000ULL);
+    const DWORD wait_result = ::WaitForSingleObject(process_info.hProcess, timeout_ms);
+    if (wait_result == WAIT_TIMEOUT) {
+        result.timed_out = true;
+        ::TerminateProcess(process_info.hProcess, kTimedOutExitCode);
+        ::WaitForSingleObject(process_info.hProcess, 2000UL);
+    }
+
+    DWORD exit_code = 0;
+    if (::GetExitCodeProcess(process_info.hProcess, &exit_code)) {
+        result.exit_code = static_cast<int>(exit_code);
+    }
+    if (result.timed_out && result.exit_code == STILL_ACTIVE) {
+        result.exit_code = kTimedOutExitCode;
+    }
+
+    ::CloseHandle(process_info.hThread);
+    ::CloseHandle(process_info.hProcess);
+
+    PopulateCapturedOutput(stdout_path, stderr_path, result);
+    CleanupLogFiles(stdout_path, stderr_path);
+    if (result.timed_out && result.exit_code == 0) {
+        result.exit_code = kTimedOutExitCode;
+    }
     return result;
 #else
-    static const std::vector<std::string> kBlockedTokens = {
-        "rm -rf",
-        "rm -r",
-        "shutdown",
-        "reboot",
-        "mkfs",
-        "dd ",
-        ":(){:|:&};:",
-        "sudo ",
-        "su ",
-        "kill -9",
-        "killall",
-        "chmod 777",
-        "chown",
-        "curl | sh",
-        "wget | sh"
-    };
-    for (const auto& token : kBlockedTokens) {
-        if (command.find(token) != std::string::npos) {
-            result.blocked = true;
-            result.output = "Error: command blocked by policy";
-            return result;
-        }
-    }
-    const auto stamp = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    const auto stdout_path = std::filesystem::temp_directory_path() / ("kabot_stdout_" + stamp + ".log");
-    const auto stderr_path = std::filesystem::temp_directory_path() / ("kabot_stderr_" + stamp + ".log");
     const char* kProxyVars[] = {
         "HTTP_PROXY",
         "HTTPS_PROXY",
@@ -177,26 +324,14 @@ ExecResult SandboxExecutor::Run(const std::string& command,
             result.exit_code = 128 + WTERMSIG(status);
         }
     } else if (result.exit_code == -1) {
-        result.exit_code = 124;
+        result.exit_code = kTimedOutExitCode;
     }
 
-    std::ostringstream output_stream;
-    std::ostringstream error_stream;
-    auto read_file = [&](const std::filesystem::path& path, std::ostringstream& target) {
-        std::ifstream input(path);
-        if (!input.is_open()) {
-            return;
-        }
-        target << input.rdbuf();
-    };
-    read_file(stdout_path, output_stream);
-    read_file(stderr_path, error_stream);
-    result.output = output_stream.str();
-    result.error = error_stream.str();
-
-    std::error_code ec;
-    std::filesystem::remove(stdout_path, ec);
-    std::filesystem::remove(stderr_path, ec);
+    PopulateCapturedOutput(stdout_path, stderr_path, result);
+    CleanupLogFiles(stdout_path, stderr_path);
+    if (result.timed_out && result.exit_code == 0) {
+        result.exit_code = kTimedOutExitCode;
+    }
     return result;
 #endif
 }
