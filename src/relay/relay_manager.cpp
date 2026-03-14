@@ -18,6 +18,7 @@
 #include <boost/asio/ssl/context.hpp>
 #include <boost/asio/ssl/stream.hpp>
 #include <boost/beast/core.hpp>
+#include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
 #include <boost/beast/websocket/ssl.hpp>
@@ -32,6 +33,7 @@ namespace {
 
 using Json = nlohmann::json;
 namespace beast = boost::beast;
+namespace http = beast::http;
 namespace websocket = beast::websocket;
 namespace net = boost::asio;
 namespace ssl = net::ssl;
@@ -85,6 +87,16 @@ bool IsIpLiteral(const std::string& host) {
     return !ec;
 }
 
+template <typename Response>
+std::string DescribeHandshakeResponse(const Response& response) {
+    std::ostringstream oss;
+    oss << "http_status=" << response.result_int() << " reason=" << response.reason();
+    if (!response.body().empty()) {
+        oss << " body=" << response.body();
+    }
+    return oss.str();
+}
+
 class IWebSocketSession {
 public:
     virtual ~IWebSocketSession() = default;
@@ -119,10 +131,16 @@ public:
 
         auto host = config_.host + ":" + std::to_string(endpoint.port());
         ws_.set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
-        try {
-            ws_.handshake(host, BuildTarget(config_));
-        } catch (const std::exception& ex) {
-            throw std::runtime_error(std::string("websocket handshake failed: ") + ex.what());
+        ws_.set_option(websocket::stream_base::decorator([](websocket::request_type& req) {
+            req.set(http::field::user_agent, "kabot-relay/1.0");
+        }));
+
+        http::response<http::string_body> response;
+        beast::error_code ec;
+        ws_.handshake(response, host, BuildTarget(config_), ec);
+        if (ec) {
+            throw std::runtime_error(std::string("websocket handshake failed: ")
+                                     + ec.message() + " (" + DescribeHandshakeResponse(response) + ")");
         }
         ws_.text(true);
     }
@@ -183,15 +201,21 @@ public:
             }
         }
         ws_.set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
+        ws_.set_option(websocket::stream_base::decorator([](websocket::request_type& req) {
+            req.set(http::field::user_agent, "kabot-relay/1.0");
+        }));
         try {
             ws_.next_layer().handshake(ssl::stream_base::client);
         } catch (const std::exception& ex) {
             throw std::runtime_error(std::string("tls handshake failed: ") + ex.what());
         }
-        try {
-            ws_.handshake(host, BuildTarget(config_));
-        } catch (const std::exception& ex) {
-            throw std::runtime_error(std::string("websocket handshake failed: ") + ex.what());
+
+        http::response<http::string_body> response;
+        beast::error_code ec;
+        ws_.handshake(response, host, BuildTarget(config_), ec);
+        if (ec) {
+            throw std::runtime_error(std::string("websocket handshake failed: ")
+                                     + ec.message() + " (" + DescribeHandshakeResponse(response) + ")");
         }
         ws_.text(true);
     }
