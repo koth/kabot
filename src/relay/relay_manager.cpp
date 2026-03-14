@@ -14,6 +14,7 @@
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/ip/address.hpp>
 #include <boost/asio/ssl/context.hpp>
 #include <boost/asio/ssl/stream.hpp>
 #include <boost/beast/core.hpp>
@@ -76,6 +77,12 @@ std::string BuildTarget(const kabot::config::RelayManagedAgentConfig& config) {
 std::string BuildSessionKey(const kabot::config::RelayManagedAgentConfig& config,
                             const std::string& command_id) {
     return "relay:" + config.name + ":" + command_id;
+}
+
+bool IsIpLiteral(const std::string& host) {
+    boost::system::error_code ec;
+    net::ip::make_address(host, ec);
+    return !ec;
 }
 
 class IWebSocketSession {
@@ -142,8 +149,10 @@ public:
         auto endpoints = resolver_.resolve(config_.host, port);
         auto endpoint = beast::get_lowest_layer(ws_).connect(endpoints);
         auto host = config_.host + ":" + std::to_string(endpoint.port());
-        if (!SSL_set_tlsext_host_name(ws_.next_layer().native_handle(), config_.host.c_str())) {
-            throw std::runtime_error("failed to set TLS SNI host");
+        if (!IsIpLiteral(config_.host)) {
+            if (!SSL_set_tlsext_host_name(ws_.next_layer().native_handle(), config_.host.c_str())) {
+                throw std::runtime_error("failed to set TLS SNI host");
+            }
         }
         ws_.set_option(websocket::stream_base::timeout::suggested(beast::role_type::client));
         ws_.next_layer().handshake(ssl::stream_base::client);
