@@ -22,6 +22,10 @@ void MessageTool::SetContext(const std::string& channel, const std::string& chat
     default_chat_id_ = chat_id;
 }
 
+void MessageTool::SetObserver(SendCallback observer) {
+    observer_ = std::move(observer);
+}
+
 std::string MessageTool::ParametersJson() const {
     return R"({"type":"object","properties":{"content":{"type":"string"},"media":{"type":"string","description":"comma-separated local file paths"},"channel":{"type":"string"},"chat_id":{"type":"string"}},"required":[]})";
 }
@@ -70,6 +74,9 @@ std::string MessageTool::Execute(const std::unordered_map<std::string, std::stri
     }
 
     callback_(msg);
+    if (observer_) {
+        observer_(msg);
+    }
     return "Message sent";
 }
 

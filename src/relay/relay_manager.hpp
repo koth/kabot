@@ -13,6 +13,55 @@
 
 namespace kabot::relay {
 
+struct RelayTaskInteraction {
+    std::string channel;
+    std::string channel_instance;
+    std::string chat_id;
+    std::string reply_to;
+};
+
+struct RelayTask {
+    std::string task_id;
+    std::string title;
+    std::string instruction;
+    std::string session_key;
+    std::string created_at;
+    std::string priority;
+    RelayTaskInteraction interaction;
+    std::unordered_map<std::string, std::string> metadata;
+};
+
+struct RelayTaskClaimResult {
+    bool success = false;
+    bool found = false;
+    int http_status = 0;
+    std::string message;
+    RelayTask task;
+};
+
+struct RelayTaskStatusUpdate {
+    std::string status;
+    std::string message;
+    int progress = -1;
+    std::string reported_at;
+    std::string session_key;
+    std::string result;
+    std::string error;
+    RelayTaskInteraction waiting_user;
+};
+
+struct RelayTaskStatusUpdateResult {
+    bool success = false;
+    int http_status = 0;
+    std::string message;
+};
+
+struct DailySummaryUploadResult {
+    bool success = false;
+    int http_status = 0;
+    std::string message;
+};
+
 class RelayManager {
 public:
     RelayManager(const kabot::config::Config& config,
@@ -21,6 +70,17 @@ public:
 
     void Start();
     void Stop();
+    std::vector<std::string> ManagedLocalAgents() const;
+    bool HasManagedLocalAgent(const std::string& local_agent) const;
+    RelayTaskClaimResult ClaimNextTask(const std::string& local_agent,
+                                       bool supports_interaction = true);
+    RelayTaskStatusUpdateResult UpdateTaskStatus(const std::string& local_agent,
+                                                 const std::string& task_id,
+                                                 const RelayTaskStatusUpdate& update);
+    DailySummaryUploadResult UploadDailySummary(const std::string& local_agent,
+                                                const std::string& summary_date,
+                                                const std::string& content,
+                                                const std::string& reported_at = {});
 
 private:
     class Worker;

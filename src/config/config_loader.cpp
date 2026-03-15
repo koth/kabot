@@ -619,6 +619,19 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         }
     }
 
+    if (data.contains("taskSystem") && data["taskSystem"].is_object()) {
+        const auto& task_system = data["taskSystem"];
+        if (task_system.contains("enabled") && task_system["enabled"].is_boolean()) {
+            config.task_system.enabled = task_system["enabled"].get<bool>();
+        }
+        if (task_system.contains("pollIntervalS") && task_system["pollIntervalS"].is_number_integer()) {
+            config.task_system.poll_interval_s = task_system["pollIntervalS"].get<int>();
+        }
+        if (task_system.contains("dailySummaryHourLocal") && task_system["dailySummaryHourLocal"].is_number_integer()) {
+            config.task_system.daily_summary_hour_local = task_system["dailySummaryHourLocal"].get<int>();
+        }
+    }
+
     if (data.contains("qmd") && data["qmd"].is_object()) {
         const auto& qmd = data["qmd"];
         if (qmd.contains("enabled") && qmd["enabled"].is_boolean()) {
@@ -1060,8 +1073,32 @@ Config LoadConfig(const std::filesystem::path& config_path) {
             config.heartbeat.cron_http_port);
     }
 
-    NormalizeConfig(config, json_agent_defaults);
+    const auto task_system_enabled = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__ENABLED",
+        "KABOT_TASK_SYSTEM_ENABLED");
+    if (!task_system_enabled.empty()) {
+        config.task_system.enabled = ParseBool(task_system_enabled);
+    }
 
+    const auto task_system_poll_interval = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__POLL_INTERVAL_S",
+        "KABOT_TASK_SYSTEM_POLL_INTERVAL_S");
+    if (!task_system_poll_interval.empty()) {
+        config.task_system.poll_interval_s = ParseInt(
+            task_system_poll_interval,
+            config.task_system.poll_interval_s);
+    }
+
+    const auto task_system_daily_summary_hour = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__DAILY_SUMMARY_HOUR_LOCAL",
+        "KABOT_TASK_SYSTEM_DAILY_SUMMARY_HOUR_LOCAL");
+    if (!task_system_daily_summary_hour.empty()) {
+        config.task_system.daily_summary_hour_local = ParseInt(
+            task_system_daily_summary_hour,
+            config.task_system.daily_summary_hour_local);
+    }
+
+    NormalizeConfig(config, json_agent_defaults);
     return config;
 }
 

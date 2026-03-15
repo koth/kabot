@@ -240,6 +240,7 @@ set(KABOT_SOURCES
   heartbeat/heartbeat_service.cpp
   relay/relay_manager.cpp
   session/session_manager.cpp
+  task/task_runtime.cpp
   utils/logging.cpp
 )
 
@@ -304,10 +305,12 @@ add_executable(routing_tests
   sandbox/sandbox_executor.cpp
   cron/cron_service.cpp
   session/session_manager.cpp
+  task/task_runtime.cpp
   config/config_loader.cpp
   providers/llm_provider.cpp
   providers/litellm_provider.cpp
   bus/message_bus.cpp
+  relay/relay_manager.cpp
 )
 target_link_libraries(routing_tests PRIVATE kabot_core)
 

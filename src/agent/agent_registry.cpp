@@ -29,6 +29,14 @@ void AgentRegistry::SetInboundExecutionReporter(InboundExecutionReporter reporte
     inbound_reporter_ = std::move(reporter);
 }
 
+void AgentRegistry::SetInboundInterceptor(InboundInterceptor interceptor) {
+    inbound_interceptor_ = std::move(interceptor);
+}
+
+void AgentRegistry::SetInboundPostProcessor(InboundPostProcessor processor) {
+    inbound_post_processor_ = std::move(processor);
+}
+
 void AgentRegistry::InitAgents() {
     agents_.clear();
     for (const auto& agent_config : config_.agents.instances) {
@@ -90,6 +98,28 @@ void AgentRegistry::RunLoop() {
 kabot::bus::OutboundMessage AgentRegistry::HandleInbound(kabot::bus::InboundMessage msg) {
     msg.agent_name = ResolveAgentName(msg);
 
+    if (inbound_interceptor_) {
+        kabot::bus::OutboundMessage intercepted{};
+        if (inbound_interceptor_(msg, intercepted)) {
+            if (intercepted.channel.empty()) {
+                intercepted.channel = msg.channel;
+            }
+            if (intercepted.channel_instance.empty()) {
+                intercepted.channel_instance = EffectiveChannelInstance(msg);
+            }
+            if (intercepted.agent_name.empty()) {
+                intercepted.agent_name = msg.agent_name;
+            }
+            if (intercepted.chat_id.empty()) {
+                intercepted.chat_id = msg.chat_id;
+            }
+            if (inbound_post_processor_) {
+                inbound_post_processor_(msg, intercepted);
+            }
+            return intercepted;
+        }
+    }
+
     auto it = agents_.find(msg.agent_name);
     if (it == agents_.end()) {
         kabot::bus::OutboundMessage outbound{};
@@ -124,19 +154,24 @@ kabot::bus::OutboundMessage AgentRegistry::HandleInbound(kabot::bus::InboundMess
     if (outbound.chat_id.empty()) {
         outbound.chat_id = msg.chat_id;
     }
+    if (inbound_post_processor_) {
+        inbound_post_processor_(msg, outbound);
+    }
     return outbound;
 }
 
 std::string AgentRegistry::ProcessDirect(const std::string& agent_name,
                                          const std::string& content,
                                          const std::string& session_key,
-                                         const DirectExecutionObserver& observer) {
+                                         const DirectExecutionObserver& observer,
+                                         const DirectExecutionTarget& target,
+                                         const DirectOutboundObserver& outbound_observer) {
     const auto resolved = agent_name.empty() ? DefaultAgentName() : agent_name;
     auto it = agents_.find(resolved);
     if (it == agents_.end()) {
         return "No agent is configured to handle this request.";
     }
-    return it->second->ProcessDirect(content, session_key, observer);
+    return it->second->ProcessDirect(content, session_key, observer, target, outbound_observer);
 }
 
 const kabot::config::AgentInstanceConfig* AgentRegistry::GetAgentConfig(const std::string& name) const {

@@ -35,6 +35,7 @@
 #include "heartbeat/heartbeat_service.hpp"
 #include "relay/relay_manager.hpp"
 #include "session/session_manager.hpp"
+#include "task/task_runtime.hpp"
 #include "providers/llm_provider.hpp"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
@@ -275,11 +276,27 @@ int RunGateway() {
         *provider,
         config,
         &heartbeat.Cron());
+    kabot::channels::ChannelManager channels(config, bus);
+    kabot::relay::RelayManager relay(config, agents);
+    kabot::task::TaskRuntime task_runtime(config, agents, relay, &heartbeat.Cron());
+
+    agents.SetInboundInterceptor([&task_runtime](kabot::bus::InboundMessage& msg,
+                                                 kabot::bus::OutboundMessage& outbound) {
+        return task_runtime.HandleInbound(msg, outbound);
+    });
+    agents.SetInboundPostProcessor([&task_runtime](const kabot::bus::InboundMessage& msg,
+                                                   const kabot::bus::OutboundMessage& outbound) {
+        task_runtime.ObserveInboundResult(msg, outbound);
+    });
 
     on_heartbeat = [&agents, &default_agent_name](const std::string& prompt) {
         return agents.ProcessDirect(default_agent_name, prompt, "heartbeat:" + default_agent_name);
     };
-    on_cron = [&agents, &bus, &config, &default_agent_name](const kabot::cron::CronJob& job) {
+    on_cron = [&agents, &bus, &config, &default_agent_name, &task_runtime](const kabot::cron::CronJob& job) {
+        std::string task_runtime_response;
+        if (task_runtime.HandleCron(job, task_runtime_response)) {
+            return task_runtime_response;
+        }
         const std::string resolved_agent_name = job.payload.agent.empty() ? default_agent_name : job.payload.agent;
         const std::string resolved_channel_name = job.payload.channel.empty() ? config.channels.instances.front().name : job.payload.channel;
         LOG_INFO("[cron] job payload deliver={} agent={} channel={} to={} message={}",
@@ -313,9 +330,6 @@ int RunGateway() {
         }
     };
 
-    kabot::channels::ChannelManager channels(config, bus);
-    kabot::relay::RelayManager relay(config, agents);
-
     kabot::session::SessionManager sessions(config.agents.defaults.workspace);
 
     httplib::Server http_server;
@@ -347,6 +361,10 @@ int RunGateway() {
             });
         }
         res.set_content(json.dump(2), "application/json");
+    });
+
+    http_server.Get("/task-runtime/state", [&task_runtime](const httplib::Request&, httplib::Response& res) {
+        res.set_content(task_runtime.DumpStateJson(), "application/json");
     });
 
     http_server.Get(R"(/sessions/(.+))", [&sessions](const httplib::Request& req, httplib::Response& res) {
@@ -418,6 +436,7 @@ int RunGateway() {
     channels.StartAll();
     relay.Start();
     heartbeat.Start();
+    task_runtime.Start();
 
     LOG_INFO("kabot gateway started. Press Ctrl+C to stop.");
     bool shutdown_guard_started = false;
@@ -443,6 +462,7 @@ int RunGateway() {
     if (http_thread.joinable()) {
         http_thread.join();
     }
+    task_runtime.Stop();
     heartbeat.Stop();
     relay.Stop();
     channels.StopAll();

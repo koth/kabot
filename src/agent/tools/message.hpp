@@ -15,6 +15,7 @@ public:
     explicit MessageTool(SendCallback callback = nullptr);
 
     void SetContext(const std::string& channel, const std::string& chat_id);
+    void SetObserver(SendCallback observer);
 
     std::string Name() const override { return "message"; }
     std::string Description() const override { return "Send a message to the user."; }
@@ -23,6 +24,7 @@ public:
 
 private:
     SendCallback callback_;
+    SendCallback observer_;
     std::string default_channel_;
     std::string default_chat_id_;
 };

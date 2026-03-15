@@ -23,6 +23,13 @@ enum class DirectExecutionPhase {
 };
 
 using DirectExecutionObserver = std::function<void(DirectExecutionPhase)>;
+using DirectOutboundObserver = std::function<void(const kabot::bus::OutboundMessage&)>;
+
+struct DirectExecutionTarget {
+    std::string channel;
+    std::string channel_instance;
+    std::string chat_id;
+};
 
 std::string DirectExecutionPhaseSummary(DirectExecutionPhase phase);
 
@@ -42,7 +49,9 @@ public:
                                               const std::function<void(bool, const std::string&)>& completion = {});
     std::string ProcessDirect(const std::string& content,
                               const std::string& session_key,
-                              const DirectExecutionObserver& observer = {});
+                              const DirectExecutionObserver& observer = {},
+                              const DirectExecutionTarget& target = {},
+                              const DirectOutboundObserver& outbound_observer = {});
     std::vector<std::string> RegisteredTools() const;
 
 private:

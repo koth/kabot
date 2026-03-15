@@ -319,8 +319,17 @@ std::vector<std::string> AgentLoop::RegisteredTools() const {
 
 std::string AgentLoop::ProcessDirect(const std::string& content,
                                      const std::string& session_key,
-                                     const DirectExecutionObserver& observer) {
+                                     const DirectExecutionObserver& observer,
+                                     const DirectExecutionTarget& target,
+                                     const DirectOutboundObserver& outbound_observer) {
     std::lock_guard<std::mutex> guard(process_mutex_);
+    if (auto* tool = tools_.Get("message")) {
+        if (auto* message_tool = dynamic_cast<kabot::agent::tools::MessageTool*>(tool)) {
+            const auto target_channel = target.channel_instance.empty() ? target.channel : target.channel_instance;
+            message_tool->SetContext(target_channel, target.chat_id);
+            message_tool->SetObserver(outbound_observer);
+        }
+    }
     auto session = sessions_.GetOrCreate(session_key);
     auto history = session.GetHistory(static_cast<std::size_t>(config_.max_history_messages));
     auto messages = context_.BuildMessages(history, content, {});
@@ -428,6 +437,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
     if (auto* tool = tools_.Get("message")) {
         if (auto* message_tool = dynamic_cast<kabot::agent::tools::MessageTool*>(tool)) {
             message_tool->SetContext(msg.channel, msg.chat_id);
+            message_tool->SetObserver({});
         }
     }
     if (auto* tool = tools_.Get("cron")) {
@@ -645,6 +655,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
     if (auto* tool = tools_.Get("message")) {
         if (auto* message_tool = dynamic_cast<kabot::agent::tools::MessageTool*>(tool)) {
             message_tool->SetContext(origin_channel, origin_chat_id);
+            message_tool->SetObserver({});
         }
     }
     if (auto* tool = tools_.Get("cron")) {

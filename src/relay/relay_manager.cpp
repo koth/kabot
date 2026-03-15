@@ -5,8 +5,10 @@
 #include <cctype>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
 #include <iomanip>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -76,15 +78,88 @@ std::string BuildTarget(const kabot::config::RelayManagedAgentConfig& config) {
     return oss.str();
 }
 
+std::string BuildDailySummaryTarget(const kabot::config::RelayManagedAgentConfig& config) {
+    return "/api/agents/" + UrlEncode(config.agent_id) + "/daily-summary";
+}
+
+std::string BuildClaimNextTaskTarget(const kabot::config::RelayManagedAgentConfig& config) {
+    return "/api/agents/" + UrlEncode(config.agent_id) + "/tasks/claim-next";
+}
+
+std::string BuildTaskStatusTarget(const kabot::config::RelayManagedAgentConfig& config,
+                                  const std::string& task_id) {
+    return "/api/agents/" + UrlEncode(config.agent_id) + "/tasks/" + UrlEncode(task_id) + "/status";
+}
+
 std::string BuildSessionKey(const kabot::config::RelayManagedAgentConfig& config,
                             const std::string& command_id) {
     return "relay:" + config.name + ":" + command_id;
+}
+
+std::string Trim(std::string value) {
+    auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
+    value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
+    return value;
+}
+
+bool IsValidSummaryDate(const std::string& value) {
+    static const std::regex pattern(R"(^\d{4}-\d{2}-\d{2}$)");
+    if (!std::regex_match(value, pattern)) {
+        return false;
+    }
+    int year = 0;
+    int month = 0;
+    int day = 0;
+    if (std::sscanf(value.c_str(), "%d-%d-%d", &year, &month, &day) != 3) {
+        return false;
+    }
+    if (month < 1 || month > 12) {
+        return false;
+    }
+    static const int days_per_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int max_day = days_per_month[month - 1];
+    const bool leap_year = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    if (month == 2 && leap_year) {
+        max_day = 29;
+    }
+    return day >= 1 && day <= max_day;
 }
 
 bool IsIpLiteral(const std::string& host) {
     boost::system::error_code ec;
     net::ip::make_address(host, ec);
     return !ec;
+}
+
+RelayTask ParseRelayTask(const Json& json) {
+    RelayTask task{};
+    if (!json.is_object()) {
+        return task;
+    }
+    task.task_id = json.value("taskId", std::string());
+    task.title = json.value("title", std::string());
+    task.instruction = json.value("instruction", std::string());
+    task.session_key = json.value("sessionKey", std::string());
+    task.created_at = json.value("createdAt", std::string());
+    task.priority = json.value("priority", std::string());
+    if (json.contains("interaction") && json["interaction"].is_object()) {
+        const auto& interaction = json["interaction"];
+        task.interaction.channel = interaction.value("channel", std::string());
+        task.interaction.channel_instance = interaction.value("channelInstance", std::string());
+        task.interaction.chat_id = interaction.value("chatId", std::string());
+        task.interaction.reply_to = interaction.value("replyTo", std::string());
+    }
+    if (json.contains("metadata") && json["metadata"].is_object()) {
+        for (const auto& [key, value] : json["metadata"].items()) {
+            if (value.is_string()) {
+                task.metadata[key] = value.get<std::string>();
+            } else if (!value.is_null()) {
+                task.metadata[key] = value.dump();
+            }
+        }
+    }
+    return task;
 }
 
 template <typename Response>
@@ -306,6 +381,112 @@ Json BuildResultPayload(const std::string& command_id,
     return payload;
 }
 
+template <typename Stream>
+http::response<http::string_body> SendDailySummaryRequest(
+    Stream& stream,
+    const kabot::config::RelayManagedAgentConfig& config,
+    const std::string& summary_date,
+    const std::string& content,
+    const std::string& reported_at) {
+    Json body = {
+        {"summaryDate", summary_date},
+        {"content", content}
+    };
+    if (!reported_at.empty()) {
+        body["reportedAt"] = reported_at;
+    }
+
+    http::request<http::string_body> request{http::verb::post, BuildDailySummaryTarget(config), 11};
+    request.set(http::field::host, config.host);
+    request.set(http::field::user_agent, "kabot-relay/1.0");
+    request.set(http::field::authorization, "Bearer " + config.token);
+    request.set(http::field::content_type, "application/json");
+    request.body() = body.dump();
+    request.prepare_payload();
+
+    http::write(stream, request);
+    beast::flat_buffer buffer;
+    http::response<http::string_body> response;
+    http::read(stream, buffer, response);
+    return response;
+}
+
+template <typename Stream>
+http::response<http::string_body> SendClaimNextTaskRequest(
+    Stream& stream,
+    const kabot::config::RelayManagedAgentConfig& config,
+    bool supports_interaction) {
+    Json body = {
+        {"localAgent", config.local_agent},
+        {"claimedAt", IsoNow()},
+        {"workerId", "gateway:" + config.local_agent},
+        {"supportsInteraction", supports_interaction}
+    };
+
+    http::request<http::string_body> request{http::verb::post, BuildClaimNextTaskTarget(config), 11};
+    request.set(http::field::host, config.host);
+    request.set(http::field::user_agent, "kabot-relay/1.0");
+    request.set(http::field::authorization, "Bearer " + config.token);
+    request.set(http::field::content_type, "application/json");
+    request.body() = body.dump();
+    request.prepare_payload();
+
+    http::write(stream, request);
+    beast::flat_buffer buffer;
+    http::response<http::string_body> response;
+    http::read(stream, buffer, response);
+    return response;
+}
+
+template <typename Stream>
+http::response<http::string_body> SendTaskStatusRequest(
+    Stream& stream,
+    const kabot::config::RelayManagedAgentConfig& config,
+    const std::string& task_id,
+    const RelayTaskStatusUpdate& update) {
+    Json body = {
+        {"status", update.status},
+        {"reportedAt", update.reported_at.empty() ? IsoNow() : update.reported_at}
+    };
+    if (!update.message.empty()) {
+        body["message"] = update.message;
+    }
+    if (update.progress >= 0) {
+        body["progress"] = update.progress;
+    }
+    if (!update.session_key.empty()) {
+        body["sessionKey"] = update.session_key;
+    }
+    if (!update.result.empty()) {
+        body["result"] = update.result;
+    }
+    if (!update.error.empty()) {
+        body["error"] = update.error;
+    }
+    if (!update.waiting_user.chat_id.empty()) {
+        body["waitingUser"] = {
+            {"channel", update.waiting_user.channel},
+            {"channelInstance", update.waiting_user.channel_instance},
+            {"chatId", update.waiting_user.chat_id},
+            {"replyTo", update.waiting_user.reply_to}
+        };
+    }
+
+    http::request<http::string_body> request{http::verb::post, BuildTaskStatusTarget(config, task_id), 11};
+    request.set(http::field::host, config.host);
+    request.set(http::field::user_agent, "kabot-relay/1.0");
+    request.set(http::field::authorization, "Bearer " + config.token);
+    request.set(http::field::content_type, "application/json");
+    request.body() = body.dump();
+    request.prepare_payload();
+
+    http::write(stream, request);
+    beast::flat_buffer buffer;
+    http::response<http::string_body> response;
+    http::read(stream, buffer, response);
+    return response;
+}
+
 }  // namespace
 
 class RelayManager::Worker {
@@ -362,7 +543,226 @@ public:
         }
     }
 
+    DailySummaryUploadResult UploadDailySummary(const std::string& summary_date,
+                                                const std::string& content,
+                                                const std::string& reported_at) const {
+        const auto trimmed_date = Trim(summary_date);
+        const auto trimmed_content = Trim(content);
+        const auto trimmed_reported_at = Trim(reported_at);
+
+        if (!config_.enabled) {
+            return {false, 0, "relay managed agent is disabled"};
+        }
+        if (trimmed_date.empty() || !IsValidSummaryDate(trimmed_date)) {
+            return {false, 0, "summaryDate must be in YYYY-MM-DD format"};
+        }
+        if (trimmed_content.empty()) {
+            return {false, 0, "content is required"};
+        }
+        if (trimmed_content.size() > 4000) {
+            return {false, 0, "content must be at most 4000 characters"};
+        }
+
+        try {
+            const auto response = config_.use_tls || config_.scheme == "wss"
+                ? UploadDailySummaryTls(trimmed_date, trimmed_content, trimmed_reported_at)
+                : UploadDailySummaryPlain(trimmed_date, trimmed_content, trimmed_reported_at);
+            const auto success = response.result_int() >= 200 && response.result_int() < 300;
+            std::string message;
+            if (!success) {
+                message = !response.body().empty()
+                    ? response.body()
+                    : std::string(response.reason());
+            }
+            return {success, static_cast<int>(response.result_int()), message};
+        } catch (const std::exception& ex) {
+            return {false, 0, ex.what()};
+        } catch (...) {
+            return {false, 0, "unknown daily summary upload error"};
+        }
+    }
+
+    RelayTaskClaimResult ClaimNextTask(bool supports_interaction) const {
+        if (!config_.enabled) {
+            return {false, false, 0, "relay managed agent is disabled", {}};
+        }
+
+        try {
+            const auto response = config_.use_tls || config_.scheme == "wss"
+                ? ClaimNextTaskTls(supports_interaction)
+                : ClaimNextTaskPlain(supports_interaction);
+            const auto http_status = static_cast<int>(response.result_int());
+            if (http_status < 200 || http_status >= 300) {
+                return {false, false, http_status,
+                        !response.body().empty() ? response.body() : std::string(response.reason()),
+                        {}};
+            }
+
+            auto json = Json::parse(response.body(), nullptr, false);
+            if (json.is_discarded() || !json.is_object()) {
+                return {false, false, http_status, "invalid claim-next response body", {}};
+            }
+            const auto found = json.value("found", false);
+            if (!found) {
+                return {true, false, http_status, {}, {}};
+            }
+            if (!json.contains("task") || !json["task"].is_object()) {
+                return {false, false, http_status, "claim-next response missing task", {}};
+            }
+            return {true, true, http_status, {}, ParseRelayTask(json["task"])};
+        } catch (const std::exception& ex) {
+            return {false, false, 0, ex.what(), {}};
+        } catch (...) {
+            return {false, false, 0, "unknown claim-next error", {}};
+        }
+    }
+
+    RelayTaskStatusUpdateResult UpdateTaskStatus(const std::string& task_id,
+                                                 const RelayTaskStatusUpdate& update) const {
+        const auto trimmed_task_id = Trim(task_id);
+        if (!config_.enabled) {
+            return {false, 0, "relay managed agent is disabled"};
+        }
+        if (trimmed_task_id.empty()) {
+            return {false, 0, "task_id is required"};
+        }
+        if (update.status.empty()) {
+            return {false, 0, "status is required"};
+        }
+
+        try {
+            const auto response = config_.use_tls || config_.scheme == "wss"
+                ? UpdateTaskStatusTls(trimmed_task_id, update)
+                : UpdateTaskStatusPlain(trimmed_task_id, update);
+            const auto success = response.result_int() >= 200 && response.result_int() < 300;
+            std::string message;
+            if (!success) {
+                message = !response.body().empty()
+                    ? response.body()
+                    : std::string(response.reason());
+            }
+            return {success, static_cast<int>(response.result_int()), message};
+        } catch (const std::exception& ex) {
+            return {false, 0, ex.what()};
+        } catch (...) {
+            return {false, 0, "unknown task status update error"};
+        }
+    }
+
 private:
+    http::response<http::string_body> ClaimNextTaskPlain(bool supports_interaction) const {
+        net::io_context ioc;
+        tcp::resolver resolver(ioc);
+        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
+        beast::tcp_stream stream(ioc);
+        stream.connect(endpoints);
+        auto response = SendClaimNextTaskRequest(stream, config_, supports_interaction);
+        beast::error_code ec;
+        stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+        return response;
+    }
+
+    http::response<http::string_body> ClaimNextTaskTls(bool supports_interaction) const {
+        net::io_context ioc;
+        tcp::resolver resolver(ioc);
+        ssl::context ssl_ctx(ssl::context::tls_client);
+        ssl_ctx.set_default_verify_paths();
+        ssl_ctx.set_verify_mode(config_.skip_tls_verify ? ssl::verify_none : ssl::verify_peer);
+        beast::ssl_stream<beast::tcp_stream> stream(ioc, ssl_ctx);
+        if (!IsIpLiteral(config_.host)) {
+            if (!SSL_set_tlsext_host_name(stream.native_handle(), config_.host.c_str())) {
+                throw std::runtime_error("failed to set TLS SNI host");
+            }
+        }
+        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
+        beast::get_lowest_layer(stream).connect(endpoints);
+        stream.handshake(ssl::stream_base::client);
+        auto response = SendClaimNextTaskRequest(stream, config_, supports_interaction);
+        beast::error_code ec;
+        stream.shutdown(ec);
+        return response;
+    }
+
+    http::response<http::string_body> UpdateTaskStatusPlain(const std::string& task_id,
+                                                            const RelayTaskStatusUpdate& update) const {
+        net::io_context ioc;
+        tcp::resolver resolver(ioc);
+        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
+        beast::tcp_stream stream(ioc);
+        stream.connect(endpoints);
+        auto response = SendTaskStatusRequest(stream, config_, task_id, update);
+        beast::error_code ec;
+        stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+        return response;
+    }
+
+    http::response<http::string_body> UpdateTaskStatusTls(const std::string& task_id,
+                                                          const RelayTaskStatusUpdate& update) const {
+        net::io_context ioc;
+        tcp::resolver resolver(ioc);
+        ssl::context ssl_ctx(ssl::context::tls_client);
+        ssl_ctx.set_default_verify_paths();
+        ssl_ctx.set_verify_mode(config_.skip_tls_verify ? ssl::verify_none : ssl::verify_peer);
+        beast::ssl_stream<beast::tcp_stream> stream(ioc, ssl_ctx);
+        if (!IsIpLiteral(config_.host)) {
+            if (!SSL_set_tlsext_host_name(stream.native_handle(), config_.host.c_str())) {
+                throw std::runtime_error("failed to set TLS SNI host");
+            }
+        }
+        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
+        beast::get_lowest_layer(stream).connect(endpoints);
+        stream.handshake(ssl::stream_base::client);
+        auto response = SendTaskStatusRequest(stream, config_, task_id, update);
+        beast::error_code ec;
+        stream.shutdown(ec);
+        return response;
+    }
+
+    http::response<http::string_body> UploadDailySummaryPlain(const std::string& summary_date,
+                                                              const std::string& content,
+                                                              const std::string& reported_at) const {
+        net::io_context ioc;
+        tcp::resolver resolver(ioc);
+        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
+        beast::tcp_stream stream(ioc);
+        stream.connect(endpoints);
+        auto response = SendDailySummaryRequest(stream,
+                                                config_,
+                                                summary_date,
+                                                content,
+                                                reported_at.empty() ? IsoNow() : reported_at);
+        beast::error_code ec;
+        stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+        return response;
+    }
+
+    http::response<http::string_body> UploadDailySummaryTls(const std::string& summary_date,
+                                                            const std::string& content,
+                                                            const std::string& reported_at) const {
+        net::io_context ioc;
+        tcp::resolver resolver(ioc);
+        ssl::context ssl_ctx(ssl::context::tls_client);
+        ssl_ctx.set_default_verify_paths();
+        ssl_ctx.set_verify_mode(config_.skip_tls_verify ? ssl::verify_none : ssl::verify_peer);
+        beast::ssl_stream<beast::tcp_stream> stream(ioc, ssl_ctx);
+        if (!IsIpLiteral(config_.host)) {
+            if (!SSL_set_tlsext_host_name(stream.native_handle(), config_.host.c_str())) {
+                throw std::runtime_error("failed to set TLS SNI host");
+            }
+        }
+        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
+        beast::get_lowest_layer(stream).connect(endpoints);
+        stream.handshake(ssl::stream_base::client);
+        auto response = SendDailySummaryRequest(stream,
+                                                config_,
+                                                summary_date,
+                                                content,
+                                                reported_at.empty() ? IsoNow() : reported_at);
+        beast::error_code ec;
+        stream.shutdown(ec);
+        return response;
+    }
+
     void Run() {
         auto reconnect_delay_ms = std::max(100, config_.reconnect_initial_delay_ms);
         while (running_) {
@@ -608,6 +1008,52 @@ void RelayManager::Stop() {
     for (auto& worker : workers_) {
         worker->Stop();
     }
+}
+
+std::vector<std::string> RelayManager::ManagedLocalAgents() const {
+    std::vector<std::string> local_agents;
+    local_agents.reserve(config_.relay.managed_agents.size());
+    for (const auto& relay_agent : config_.relay.managed_agents) {
+        if (!relay_agent.enabled || relay_agent.local_agent.empty()) {
+            continue;
+        }
+        local_agents.push_back(relay_agent.local_agent);
+    }
+    return local_agents;
+}
+
+bool RelayManager::HasManagedLocalAgent(const std::string& local_agent) const {
+    return workers_by_local_agent_.find(local_agent) != workers_by_local_agent_.end();
+}
+
+RelayTaskClaimResult RelayManager::ClaimNextTask(const std::string& local_agent,
+                                                 bool supports_interaction) {
+    const auto it = workers_by_local_agent_.find(local_agent);
+    if (it == workers_by_local_agent_.end() || it->second == nullptr) {
+        return {false, false, 0, "no relay managed agent bound to local agent: " + local_agent, {}};
+    }
+    return it->second->ClaimNextTask(supports_interaction);
+}
+
+RelayTaskStatusUpdateResult RelayManager::UpdateTaskStatus(const std::string& local_agent,
+                                                           const std::string& task_id,
+                                                           const RelayTaskStatusUpdate& update) {
+    const auto it = workers_by_local_agent_.find(local_agent);
+    if (it == workers_by_local_agent_.end() || it->second == nullptr) {
+        return {false, 0, "no relay managed agent bound to local agent: " + local_agent};
+    }
+    return it->second->UpdateTaskStatus(task_id, update);
+}
+
+DailySummaryUploadResult RelayManager::UploadDailySummary(const std::string& local_agent,
+                                                          const std::string& summary_date,
+                                                          const std::string& content,
+                                                          const std::string& reported_at) {
+    const auto it = workers_by_local_agent_.find(local_agent);
+    if (it == workers_by_local_agent_.end() || it->second == nullptr) {
+        return {false, 0, "no relay managed agent bound to local agent: " + local_agent};
+    }
+    return it->second->UploadDailySummary(summary_date, content, reported_at);
 }
 
 }  // namespace kabot::relay

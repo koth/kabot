@@ -139,6 +139,12 @@ struct HeartbeatConfig {
     int cron_http_port = 8089;
 };
 
+struct TaskSystemConfig {
+    bool enabled = false;
+    int poll_interval_s = 30;
+    int daily_summary_hour_local = 22;
+};
+
 struct QmdConfig {
     bool enabled = false;
     std::string command = "qmd";
@@ -162,6 +168,7 @@ struct Config {
     RelayConfig relay;
     ChannelsConfig channels;
     HeartbeatConfig heartbeat;
+    TaskSystemConfig task_system;
     ProvidersConfig providers;
     QmdConfig qmd;
     LoggingConfig logging;

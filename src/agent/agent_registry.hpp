@@ -20,6 +20,10 @@ public:
                                                         DirectExecutionPhase,
                                                         bool,
                                                         const std::string&)>;
+    using InboundInterceptor = std::function<bool(kabot::bus::InboundMessage&,
+                                                  kabot::bus::OutboundMessage&)>;
+    using InboundPostProcessor = std::function<void(const kabot::bus::InboundMessage&,
+                                                    const kabot::bus::OutboundMessage&)>;
 
     AgentRegistry(kabot::bus::MessageBus& bus,
                   kabot::providers::LLMProvider& provider,
@@ -29,12 +33,16 @@ public:
     void Start();
     void Stop();
     void SetInboundExecutionReporter(InboundExecutionReporter reporter);
+    void SetInboundInterceptor(InboundInterceptor interceptor);
+    void SetInboundPostProcessor(InboundPostProcessor processor);
 
     kabot::bus::OutboundMessage HandleInbound(kabot::bus::InboundMessage msg);
     std::string ProcessDirect(const std::string& agent_name,
                               const std::string& content,
                               const std::string& session_key,
-                              const DirectExecutionObserver& observer = {});
+                              const DirectExecutionObserver& observer = {},
+                              const DirectExecutionTarget& target = {},
+                              const DirectOutboundObserver& outbound_observer = {});
     const kabot::config::AgentInstanceConfig* GetAgentConfig(const std::string& name) const;
     std::string ResolveAgentName(const kabot::bus::InboundMessage& msg) const;
     std::string DefaultAgentName() const;
@@ -49,6 +57,8 @@ private:
     kabot::cron::CronService* cron_ = nullptr;
     std::unordered_map<std::string, std::unique_ptr<AgentLoop>> agents_;
     InboundExecutionReporter inbound_reporter_;
+    InboundInterceptor inbound_interceptor_;
+    InboundPostProcessor inbound_post_processor_;
     std::atomic<bool> running_{false};
     std::thread worker_;
 };
