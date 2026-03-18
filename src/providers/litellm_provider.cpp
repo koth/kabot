@@ -197,7 +197,7 @@ LLMResponse LiteLLMProvider::Chat(
         if (use_anthropic) {
             std::string system_prompt;
             payload["model"] = chosen_model;
-            payload["max_tokens"] = max_tokens;
+            //payload["max_tokens"] = max_tokens;
             payload["temperature"] = temperature;
             payload["messages"] = nlohmann::json::array();
 
