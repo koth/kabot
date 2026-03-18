@@ -402,7 +402,8 @@ LLMResponse LiteLLMProvider::Chat(
             }
         }
 
-        auto response = client->Post(endpoint.c_str(), headers, payload.dump(), "application/json");
+        const auto payload_body = payload.dump();
+        auto response = client->Post(endpoint.c_str(), headers, payload_body, "application/json");
         if (!response) {
             const auto err = response.error();
             const auto err_text = HttpLibErrorToString(err);
@@ -416,6 +417,7 @@ LLMResponse LiteLLMProvider::Chat(
             return error_response;
         }
         if (response->status >= 400) {
+            LOG_ERROR("[llm] request body={}", payload_body);
             LOG_ERROR("[llm] HTTP {} body={}", response->status, response->body);
             LLMResponse error_response{};
             error_response.content = "Error calling LLM: HTTP " + std::to_string(response->status);
