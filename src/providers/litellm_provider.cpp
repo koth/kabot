@@ -197,7 +197,7 @@ LLMResponse LiteLLMProvider::Chat(
         if (use_anthropic) {
             std::string system_prompt;
             payload["model"] = chosen_model;
-            //payload["max_tokens"] = max_tokens;
+            payload["max_tokens"] = max_tokens;
             payload["temperature"] = temperature;
             payload["messages"] = nlohmann::json::array();
 
@@ -393,6 +393,7 @@ LLMResponse LiteLLMProvider::Chat(
                  (use_anthropic ? "anthropic" : "openai"));
 
         httplib::Headers headers{{"Content-Type", "application/json"}};
+        headers.emplace("User-Agent", "claude-code/0.1.0");
         if (!api_key_.empty()) {
             if (use_anthropic) {
                 headers.emplace("x-api-key", api_key_);
