@@ -1,5 +1,6 @@
 #include "util/random.hpp"
 
+#include <chrono>
 #include <random>
 #include <sstream>
 #include <iomanip>

@@ -1,4 +1,5 @@
 #include "connection_manager.hpp"
+#include <algorithm>
 #include <chrono>
 
 namespace weixin::monitor {

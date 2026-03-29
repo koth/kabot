@@ -1,6 +1,7 @@
 #include "media/silk/silk_decoder.hpp"
 #include "media/silk/silk_sdk_wrapper.hpp"
 
+#include <cstring>
 #include <string>
 
 namespace weixin::media::silk {
