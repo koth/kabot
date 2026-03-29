@@ -155,17 +155,20 @@ APIResponse<GetUpdatesData> APIClient::GetUpdates(
       
       for (const auto& msg_json : j["msgs"]) {
         WeixinMessage msg;
-        if (msg_json.contains("msg_id")) {
-          msg.message_id = msg_json["msg_id"].get<uint64_t>();
+        if (msg_json.contains("message_id")) {
+          msg.message_id = msg_json["message_id"].get<uint64_t>();
         }
-        if (msg_json.contains("from_username")) {
-          msg.from_user_id = msg_json["from_username"].get<std::string>();
+        if (msg_json.contains("from_user_id")) {
+          msg.from_user_id = msg_json["from_user_id"].get<std::string>();
+          WEIXIN_LOG_DEBUG("GetUpdates: Found from_user_id=" << msg.from_user_id.value());
+        } else {
+          WEIXIN_LOG_WARN("GetUpdates: Message missing from_user_id!");
         }
-        if (msg_json.contains("to_username")) {
-          msg.to_user_id = msg_json["to_username"].get<std::string>();
+        if (msg_json.contains("to_user_id")) {
+          msg.to_user_id = msg_json["to_user_id"].get<std::string>();
         }
-        if (msg_json.contains("context")) {
-          msg.context_token = msg_json["context"].get<std::string>();
+        if (msg_json.contains("context_token")) {
+          msg.context_token = msg_json["context_token"].get<std::string>();
         }
         // Parse msg_item_list for content
         if (msg_json.contains("msg_item_list") && msg_json["msg_item_list"].is_array()) {
