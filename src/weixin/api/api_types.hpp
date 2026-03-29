@@ -78,6 +78,10 @@ struct WeixinMessage {
   std::optional<MessageType> message_type;
   std::optional<MessageState> message_state;
   std::vector<MessageItem> item_list;  // Field name is "item_list" in JSON
+  // Timestamp fields
+  std::optional<uint64_t> create_time_ms;
+  std::optional<uint64_t> update_time_ms;
+  std::optional<uint64_t> delete_time_ms;
 };
 
 // API response structures

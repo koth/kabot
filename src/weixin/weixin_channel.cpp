@@ -105,12 +105,16 @@ void WeixinChannel::Stop() {
 }
 
 bool WeixinChannel::Send(const kabot::bus::OutboundMessage& msg) {
+  std::cout << "[weixin:info] Send: Called with chat_id=" << msg.chat_id << ", reply_to=" << msg.reply_to << std::endl;
+  
   if (!api_client_) {
+    std::cout << "[weixin:error] Send: api_client_ is null" << std::endl;
     return false;
   }
   
   auto it_action = msg.metadata.find("action");
   if (it_action != msg.metadata.end() && it_action->second == "typing") {
+    std::cout << "[weixin:debug] Send: Typing indicator, skipping" << std::endl;
     // Typing indicator - Weixin API doesn't support this directly
     return true;
   }
@@ -121,12 +125,16 @@ bool WeixinChannel::Send(const kabot::bus::OutboundMessage& msg) {
     auto it = chat_id_map_.find(msg.reply_to);
     if (it != chat_id_map_.end()) {
       chat_id = it->second;
+      std::cout << "[weixin:debug] Send: Found chat_id from reply_to=" << chat_id << std::endl;
     }
   }
   
   if (chat_id.empty()) {
+    std::cout << "[weixin:error] Send: chat_id is empty and cannot be resolved" << std::endl;
     return false;
   }
+  
+  std::cout << "[weixin:info] Send: Sending to chat_id=" << chat_id << ", content_length=" << msg.content.length() << std::endl;
   
   // Get context token
   storage::ContextTokenStore token_store(account_.account_id);
@@ -135,12 +143,25 @@ bool WeixinChannel::Send(const kabot::bus::OutboundMessage& msg) {
   // Convert markdown to plain text
   std::string text = ConvertMarkdownToText(msg.content);
   
+  std::cout << "[weixin:debug] Send: context_token=" << (context_token.has_value() ? "present" : "empty") << std::endl;
+  
   // Send message
+  std::cout << "[weixin:info] Send: Calling SendTextMessage" << std::endl;
   auto result = api_client_->SendTextMessage(
       chat_id,
       context_token.value_or(""),
       text
   );
+  
+  if (result.success) {
+    std::cout << "[weixin:info] Send: Message sent successfully" << std::endl;
+  } else {
+    std::cout << "[weixin:error] Send: Failed to send message";
+    if (result.error.has_value()) {
+      std::cout << " error=" << result.error.value().errmsg;
+    }
+    std::cout << std::endl;
+  }
   
   return result.success;
 }

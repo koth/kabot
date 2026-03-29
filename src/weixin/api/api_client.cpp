@@ -170,6 +170,16 @@ APIResponse<GetUpdatesData> APIClient::GetUpdates(
         if (msg_json.contains("context_token")) {
           msg.context_token = msg_json["context_token"].get<std::string>();
         }
+        // Parse timestamp fields
+        if (msg_json.contains("create_time_ms")) {
+          msg.create_time_ms = msg_json["create_time_ms"].get<uint64_t>();
+        }
+        if (msg_json.contains("update_time_ms")) {
+          msg.update_time_ms = msg_json["update_time_ms"].get<uint64_t>();
+        }
+        if (msg_json.contains("delete_time_ms")) {
+          msg.delete_time_ms = msg_json["delete_time_ms"].get<uint64_t>();
+        }
         // Parse item_list for content (TypeScript uses "item_list", not "msg_item_list")
         if (msg_json.contains("item_list") && msg_json["item_list"].is_array()) {
           WEIXIN_LOG_DEBUG("GetUpdates: Found item_list with " << msg_json["item_list"].size() << " items");
@@ -218,6 +228,8 @@ APIResponse<GetUpdatesData> APIClient::GetUpdates(
 APIResponse<void> APIClient::SendTextMessage(const std::string& user_id,
                                               const std::string& context_token,
                                               const std::string& content) {
+  WEIXIN_LOG_INFO("SendTextMessage: Sending to user=" << user_id << ", content_length=" << content.length());
+  
   // Build message according to TypeScript structure
   nlohmann::json msg;
   msg["from_user_id"] = "";  // Empty for bot messages
@@ -225,33 +237,49 @@ APIResponse<void> APIClient::SendTextMessage(const std::string& user_id,
   msg["client_id"] = util::GenerateMessageId();
   msg["message_type"] = static_cast<int>(MessageType::BOT);
   msg["message_state"] = static_cast<int>(MessageState::FINISH);
-  msg["context"] = context_token;
+  msg["context_token"] = context_token;
   
-  // Build item_list with text item
+  // Build item_list with text item (field name is "item_list" not "msg_item_list")
   nlohmann::json item_list = nlohmann::json::array();
   nlohmann::json text_item;
   text_item["type"] = static_cast<int>(MessageItemType::TEXT);
   text_item["text_item"] = nlohmann::json::object();
   text_item["text_item"]["text"] = content;
   item_list.push_back(text_item);
-  msg["msg_item_list"] = item_list;
+  msg["item_list"] = item_list;
   
   // Wrap in body with msg key
   nlohmann::json body;
   body["msg"] = msg;
   
+  std::string body_str = body.dump();
+  WEIXIN_LOG_DEBUG("SendTextMessage: Request body=" << body_str);
+  
   auto res = http_client_->Post(
       (std::string(kBasePath) + "/sendmessage").c_str(),
-      body.dump(),
+      body_str,
       "application/json"
   );
 
-  if (!res || res->status != 200) {
+  if (!res) {
+    WEIXIN_LOG_ERROR("SendTextMessage: Network error - no response");
     APIResponse<void> error_result;
     error_result.success = false;
-    error_result.error = APIError{-1, "Failed to send message"};
+    error_result.error = APIError{-1, "Network error"};
     return error_result;
   }
+  
+  WEIXIN_LOG_DEBUG("SendTextMessage: Response status=" << res->status << ", body=" << res->body);
+
+  if (res->status != 200) {
+    WEIXIN_LOG_ERROR("SendTextMessage: HTTP error status=" << res->status << ", body=" << res->body);
+    APIResponse<void> error_result;
+    error_result.success = false;
+    error_result.error = APIError{-1, "Failed to send message, status=" + std::to_string(res->status)};
+    return error_result;
+  }
+  
+  WEIXIN_LOG_INFO("SendTextMessage: Message sent successfully");
 
   APIResponse<void> success_result;
   success_result.success = true;
