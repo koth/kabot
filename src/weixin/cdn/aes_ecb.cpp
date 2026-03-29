@@ -2,6 +2,7 @@
 
 #include <openssl/evp.h>
 #include <openssl/err.h>
+#include <cstring>
 #include <string>
 
 namespace weixin::cdn {
