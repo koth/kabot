@@ -32,7 +32,7 @@ std::string QRLogin::StartLogin(const std::string& base_url) {
   }
   
   const auto& qr_data = result.data.value();
-  qrcode_token_ = qr_data.qrcode_token;
+  qrcode_ = qr_data.qrcode;
   
   // Display QR code URL
   std::cout << "\n========================================" << std::endl;
@@ -46,8 +46,8 @@ std::string QRLogin::StartLogin(const std::string& base_url) {
 }
 
 std::optional<std::string> QRLogin::PollStatus(int max_retries) {
-  if (qrcode_token_.empty()) {
-    std::cerr << "[weixin] QR code token not initialized. Call StartLogin first." << std::endl;
+  if (qrcode_.empty()) {
+    std::cerr << "[weixin] QR code not initialized. Call StartLogin first." << std::endl;
     return std::nullopt;
   }
   
@@ -62,7 +62,7 @@ std::optional<std::string> QRLogin::PollStatus(int max_retries) {
   constexpr int max_polls = 180;  // 6 minutes max (2 seconds per poll)
   
   while (!cancelled_ && poll_count < max_polls) {
-    auto result = client.GetQRCodeStatus(qrcode_token_);
+    auto result = client.GetQRCodeStatus(qrcode_);
     
     if (!result.success) {
       std::cerr << "[weixin] Failed to get QR status: "

@@ -26,7 +26,7 @@ public:
   
 private:
   std::string base_url_;
-  std::string qrcode_token_;
+  std::string qrcode_;
   bool cancelled_ = false;
   int retry_count_ = 0;
 };

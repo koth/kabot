@@ -94,9 +94,8 @@ struct APIResponse<void> {
 
 // QR Code login structures
 struct QRCodeData {
-  std::string qrcode_url;
-  std::string qrcode_token;
-  uint64_t expired_timestamp;
+  std::string qrcode;        // QR code token for polling
+  std::string qrcode_url;    // QR code image URL for display
 };
 
 enum class QRCodeStatus {

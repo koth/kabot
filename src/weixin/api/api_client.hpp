@@ -50,7 +50,7 @@ public:
   // QR Code login
   APIResponse<QRCodeData> GetQRCode();
   APIResponse<QRCodeStatusResponse> GetQRCodeStatus(
-      const std::string& qrcode_token);
+      const std::string& qrcode);
 
   // Get bot config
   APIResponse<nlohmann::json> GetConfig(const std::string& user_id);

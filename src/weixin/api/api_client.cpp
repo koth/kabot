@@ -213,7 +213,9 @@ APIResponse<UploadUrlData> APIClient::GetUploadUrl(UploadMediaType media_type,
 }
 
 APIResponse<QRCodeData> APIClient::GetQRCode() {
-  auto res = http_client_->Get((std::string(kBasePath) + "/get_qrcode").c_str());
+  // Endpoint: ilink/bot/get_bot_qrcode?bot_type=xxx
+  std::string path = std::string(kBasePath) + "/get_bot_qrcode?bot_type=" + app_id_;
+  auto res = http_client_->Get(path.c_str());
 
   if (!res) {
     APIResponse<QRCodeData> error_result;
@@ -225,7 +227,7 @@ APIResponse<QRCodeData> APIClient::GetQRCode() {
   if (res->status != 200) {
     APIResponse<QRCodeData> error_result;
     error_result.success = false;
-    error_result.error = APIError{static_cast<int>(res->status), "HTTP error: " + std::to_string(res->status)};
+    error_result.error = APIError{static_cast<int>(res->status), "HTTP error: " + std::to_string(res->status) + " body: " + res->body};
     return error_result;
   }
 
@@ -244,9 +246,8 @@ APIResponse<QRCodeData> APIClient::GetQRCode() {
     }
 
     QRCodeData data;
-    data.qrcode_url = j.value("qrcode_url", "");
-    data.qrcode_token = j.value("qrcode_token", "");
-    data.expired_timestamp = j.value("expired_timestamp", static_cast<uint64_t>(0));
+    data.qrcode = j.value("qrcode", "");
+    data.qrcode_url = j.value("qrcode_img_content", "");
     
     APIResponse<QRCodeData> success_result;
     success_result.success = true;
@@ -261,15 +262,11 @@ APIResponse<QRCodeData> APIClient::GetQRCode() {
 }
 
 APIResponse<QRCodeStatusResponse> APIClient::GetQRCodeStatus(
-    const std::string& qrcode_token) {
-  nlohmann::json body;
-  body["qrcode_token"] = qrcode_token;
+    const std::string& qrcode) {
+  // Endpoint: ilink/bot/get_qrcode_status?qrcode=xxx
+  std::string path = std::string(kBasePath) + "/get_qrcode_status?qrcode=" + httplib::detail::encode_url(qrcode);
   
-  auto res = http_client_->Post(
-      (std::string(kBasePath) + "/get_qrcode_status").c_str(),
-      body.dump(),
-      "application/json"
-  );
+  auto res = http_client_->Get(path.c_str());
 
   if (!res || res->status != 200) {
     APIResponse<QRCodeStatusResponse> error_result;
