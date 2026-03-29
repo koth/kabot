@@ -77,7 +77,7 @@ struct WeixinMessage {
   std::optional<std::string> context_token; // Maps to context in JSON
   std::optional<MessageType> message_type;
   std::optional<MessageState> message_state;
-  std::vector<MessageItem> item_list;  // Maps to msg_item_list in JSON
+  std::vector<MessageItem> item_list;  // Field name is "item_list" in JSON
 };
 
 // API response structures

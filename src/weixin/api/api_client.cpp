@@ -170,9 +170,10 @@ APIResponse<GetUpdatesData> APIClient::GetUpdates(
         if (msg_json.contains("context_token")) {
           msg.context_token = msg_json["context_token"].get<std::string>();
         }
-        // Parse msg_item_list for content
-        if (msg_json.contains("msg_item_list") && msg_json["msg_item_list"].is_array()) {
-          for (const auto& item_json : msg_json["msg_item_list"]) {
+        // Parse item_list for content (TypeScript uses "item_list", not "msg_item_list")
+        if (msg_json.contains("item_list") && msg_json["item_list"].is_array()) {
+          WEIXIN_LOG_DEBUG("GetUpdates: Found item_list with " << msg_json["item_list"].size() << " items");
+          for (const auto& item_json : msg_json["item_list"]) {
             MessageItem item;
             if (item_json.contains("type")) {
               int type_val = item_json["type"].get<int>();
