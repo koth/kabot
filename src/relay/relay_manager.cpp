@@ -132,6 +132,34 @@ bool IsIpLiteral(const std::string& host) {
     return !ec;
 }
 
+std::vector<std::string> ParseStringArray(const Json& json, const std::string& key) {
+    std::vector<std::string> result;
+    if (!json.contains(key) || !json[key].is_array()) {
+        return result;
+    }
+    for (const auto& item : json[key].items()) {
+        if (item.value().is_string()) {
+            result.push_back(item.value().get<std::string>());
+        }
+    }
+    return result;
+}
+
+std::unordered_map<std::string, std::string> ParseStringMap(const Json& json, const std::string& key) {
+    std::unordered_map<std::string, std::string> result;
+    if (!json.contains(key) || !json[key].is_object()) {
+        return result;
+    }
+    for (const auto& [k, v] : json[key].items()) {
+        if (v.is_string()) {
+            result[k] = v.get<std::string>();
+        } else if (!v.is_null()) {
+            result[k] = v.dump();
+        }
+    }
+    return result;
+}
+
 RelayTask ParseRelayTask(const Json& json) {
     RelayTask task{};
     if (!json.is_object()) {
@@ -143,6 +171,9 @@ RelayTask ParseRelayTask(const Json& json) {
     task.session_key = json.value("sessionKey", std::string());
     task.created_at = json.value("createdAt", std::string());
     task.priority = json.value("priority", std::string());
+    task.waiting_user = json.value("waitingUser", false);
+    task.merge_request = json.value("mergeRequest", std::string());
+    
     if (json.contains("interaction") && json["interaction"].is_object()) {
         const auto& interaction = json["interaction"];
         task.interaction.channel = interaction.value("channel", std::string());
@@ -150,15 +181,27 @@ RelayTask ParseRelayTask(const Json& json) {
         task.interaction.chat_id = interaction.value("chatId", std::string());
         task.interaction.reply_to = interaction.value("replyTo", std::string());
     }
+    
     if (json.contains("metadata") && json["metadata"].is_object()) {
-        for (const auto& [key, value] : json["metadata"].items()) {
-            if (value.is_string()) {
-                task.metadata[key] = value.get<std::string>();
-            } else if (!value.is_null()) {
-                task.metadata[key] = value.dump();
-            }
+        task.metadata = ParseStringMap(json, "metadata");
+    }
+    
+    // Parse project context
+    if (json.contains("project") && json["project"].is_object()) {
+        const auto& project = json["project"];
+        task.project.project_id = project.value("projectId", std::string());
+        task.project.name = project.value("name", std::string());
+        task.project.description = project.value("description", std::string());
+        if (project.contains("metadata") && project["metadata"].is_object()) {
+            task.project.metadata = ParseStringMap(project, "metadata");
         }
     }
+    
+    // Parse dependency context
+    task.depends_on_task_ids = ParseStringArray(json, "dependsOnTaskIds");
+    task.blocked_by_task_ids = ParseStringArray(json, "blockedByTaskIds");
+    task.dependency_state = ParseStringMap(json, "dependencyState");
+    
     return task;
 }
 

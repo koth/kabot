@@ -4,9 +4,13 @@
 #include <thread>
 
 #include "channels/lark_channel.hpp"
-#include "channels/qqbot_channel.hpp"
 #include "channels/telegram_channel.hpp"
+#include "weixin/weixin_channel.hpp"
 #include "utils/logging.hpp"
+
+#ifdef KABOT_ENABLE_QQBOT
+#include "channels/qqbot_channel.hpp"
+#endif
 
 namespace kabot::channels {
 
@@ -137,7 +141,23 @@ void ChannelManager::RegisterInstance(const kabot::config::ChannelInstanceConfig
     } else if (config.type == "lark") {
         Register(std::make_unique<LarkChannel>(config.lark, bus_));
     } else if (config.type == "qqbot") {
+#ifdef KABOT_ENABLE_QQBOT
         Register(std::make_unique<QQBotChannel>(config.qqbot, bus_));
+#endif
+    } else if (config.type == "weixin") {
+        weixin::WeixinChannel::Config weixin_config;
+        weixin_config.name = config.weixin.name;
+        weixin_config.account_id = config.weixin.account_id;
+        // Note: token is loaded from storage by WeixinChannel itself
+        // If no token exists, QR code login will be initiated
+        weixin_config.allow_from = config.weixin.allow_from;
+        weixin_config.binding_agent = config.binding.agent;
+        weixin_config.app_id = config.weixin.app_id;
+        weixin_config.app_version = config.weixin.app_version;
+        weixin_config.base_url = config.weixin.base_url;
+        weixin_config.cdn_base_url = config.weixin.cdn_base_url;
+        weixin_config.route_tag = config.weixin.route_tag;
+        Register(std::make_unique<weixin::WeixinChannel>(weixin_config, bus_));
     }
 }
 

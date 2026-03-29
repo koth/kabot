@@ -1,0 +1,41 @@
+# Generate all cpp stub files
+cpp_files=(
+  "api/api_client.cpp"
+  "api/config_cache.cpp"
+  "api/session_guard.cpp"
+  "auth/accounts.cpp"
+  "auth/login_qr.cpp"
+  "auth/pairing.cpp"
+  "cdn/aes_ecb.cpp"
+  "cdn/cdn_upload.cpp"
+  "cdn/cdn_url.cpp"
+  "cdn/file_upload.cpp"
+  "cdn/pic_decrypt.cpp"
+  "config/config_schema.cpp"
+  "media/media_downloader.cpp"
+  "media/mime_detector.cpp"
+  "media/silk/silk_decoder.cpp"
+  "media/silk/silk_sdk_wrapper.cpp"
+  "media/silk_transcoder.cpp"
+  "messaging/inbound_processor.cpp"
+  "messaging/message_pipeline.cpp"
+  "messaging/message_sender.cpp"
+  "messaging/media_sender.cpp"
+  "messaging/slash_commands.cpp"
+  "messaging/debug_mode.cpp"
+  "messaging/error_notifier.cpp"
+  "monitor/poll_monitor.cpp"
+  "storage/state_directory.cpp"
+  "storage/sync_buffer.cpp"
+  "storage/context_token_store.cpp"
+  "storage/file_lock.cpp"
+  "util/logger.cpp"
+  "util/random.cpp"
+  "util/redact.cpp"
+)
+
+for file in "${cpp_files[@]}"; do
+  touch "$file"
+done
+
+echo "Created all stub .cpp files"

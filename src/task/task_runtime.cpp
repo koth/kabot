@@ -9,7 +9,9 @@
 #include <sstream>
 #include <utility>
 
+#include "agent/memory_store.hpp"
 #include "nlohmann/json.hpp"
+#include "utils/logging.hpp"
 
 namespace kabot::task {
 namespace {
@@ -35,6 +37,84 @@ bool ContainsAny(const std::string& content, const std::initializer_list<std::st
     return std::any_of(markers.begin(), markers.end(), [&content](const std::string_view marker) {
         return content.find(marker) != std::string::npos;
     });
+}
+
+// Format dependency info for status summary
+std::string FormatDependencyInfo(const kabot::relay::RelayTask& task) {
+    std::ostringstream oss;
+    if (!task.depends_on_task_ids.empty()) {
+        oss << " depends on [";
+        for (size_t i = 0; i < task.depends_on_task_ids.size(); ++i) {
+            if (i > 0) oss << ", ";
+            oss << task.depends_on_task_ids[i];
+        }
+        oss << "]";
+    }
+    if (!task.blocked_by_task_ids.empty()) {
+        oss << " blocked by [";
+        for (size_t i = 0; i < task.blocked_by_task_ids.size(); ++i) {
+            if (i > 0) oss << ", ";
+            oss << task.blocked_by_task_ids[i];
+        }
+        oss << "]";
+    }
+    return oss.str();
+}
+
+// Build execution context summary for memory
+std::string BuildContextSummary(const kabot::relay::RelayTask& task) {
+    std::ostringstream oss;
+    oss << "Task: " << task.task_id;
+    if (!task.title.empty()) {
+        oss << " (" << task.title << ")";
+    }
+    if (!task.project.name.empty()) {
+        oss << " | Project: " << task.project.name;
+    } else if (!task.project.project_id.empty()) {
+        oss << " | Project: " << task.project.project_id;
+    }
+    
+    auto dep_info = FormatDependencyInfo(task);
+    if (!dep_info.empty()) {
+        oss << " |" << dep_info;
+    }
+    
+    if (task.waiting_user) {
+        oss << " | Waiting for user input";
+    }
+    if (!task.merge_request.empty()) {
+        oss << " | MR: " << task.merge_request;
+    }
+    
+    return oss.str();
+}
+
+// Write memory entry to agent's memory store
+void WriteTaskMemory(const std::string& workspace,
+                     const std::string& task_id,
+                     const std::string& project_name,
+                     const std::string& state,
+                     const std::string& goal,
+                     const std::string& result = "") {
+    try {
+        kabot::agent::MemoryStore memory(workspace);
+        std::ostringstream entry;
+        entry << "- [" << task_id << "]";
+        if (!project_name.empty()) {
+            entry << " [" << project_name << "]";
+        }
+        entry << " State: " << state;
+        if (!goal.empty()) {
+            entry << " | Goal: " << goal;
+        }
+        if (!result.empty()) {
+            entry << " | Result: " << result;
+        }
+        entry << "\n";
+        memory.AppendToday(entry.str());
+    } catch (const std::exception& ex) {
+        LOG_WARN("[task_runtime] failed to write memory: {}", ex.what());
+    }
 }
 
 }  // namespace
@@ -167,35 +247,68 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
     const auto session_key = task.session_key.empty()
         ? "task:" + local_agent + ":" + task.task_id
         : task.session_key;
+    
+    const auto* agent_config = agents_.GetAgentConfig(local_agent);
+    const std::string workspace = agent_config ? agent_config->workspace : config_.agents.defaults.workspace;
+    const std::string project_name = task.project.name.empty() ? task.project.project_id : task.project.name;
 
+    // Build context summary for status reporting
+    const auto context_summary = BuildContextSummary(task);
+
+    // Step 1: Report claimed status
     relay_.UpdateTaskStatus(local_agent, task.task_id, {
         "claimed",
-        "task claimed by gateway",
+        "Claimed task " + task.task_id + " and preparing context",
         0,
         NowIso(),
         session_key
     });
+
+    // Write claim memory
+    WriteTaskMemory(workspace, task.task_id, project_name, "claimed", 
+                    "Preparing execution context: " + context_summary);
+
+    // Step 2: Report running status with context
+    std::string running_summary = "Executing task " + task.task_id;
+    if (!project_name.empty()) {
+        running_summary += " in project " + project_name;
+    }
+    running_summary += ": " + task.title;
+    
     relay_.UpdateTaskStatus(local_agent, task.task_id, {
         "running",
-        "task execution started",
+        running_summary,
         5,
         NowIso(),
         session_key
     });
+
+    // Write start memory
+    WriteTaskMemory(workspace, task.task_id, project_name, "running", 
+                    "Started execution: " + task.title);
 
     bool waiting = false;
     kabot::relay::RelayTaskInteraction waiting_user{};
     std::string waiting_question;
 
     try {
-        const auto observer = [this, local_agent, task_id = task.task_id, session_key](kabot::agent::DirectExecutionPhase phase) {
+        const auto observer = [this, local_agent, task_id = task.task_id, session_key, 
+                               workspace, task, project_name](kabot::agent::DirectExecutionPhase phase) {
+            const auto phase_summary = kabot::agent::DirectExecutionPhaseSummary(phase);
+            
             relay_.UpdateTaskStatus(local_agent, task_id, {
                 "running",
-                kabot::agent::DirectExecutionPhaseSummary(phase),
+                phase_summary,
                 -1,
                 NowIso(),
                 session_key
             });
+
+            // Write milestone memory on important phases
+            if (phase == kabot::agent::DirectExecutionPhase::kCallingTools) {
+                WriteTaskMemory(workspace, task_id, project_name, "running", 
+                               "Calling tools to process task");
+            }
         };
 
         const kabot::agent::DirectExecutionTarget target{
@@ -219,6 +332,10 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             waiting_user.channel_instance = outbound.channel_instance;
             waiting_user.chat_id = outbound.chat_id;
             waiting_user.reply_to = task.interaction.reply_to;
+            
+            // Write waiting memory
+            WriteTaskMemory(workspace, task.task_id, project_name, "waiting_user", 
+                           "Waiting for user input: " + waiting_question);
         };
 
         const auto result = agents_.ProcessDirect(local_agent,
@@ -252,7 +369,8 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             }
             relay_.UpdateTaskStatus(local_agent, task.task_id, {
                 "waiting_user",
-                waiting_question.empty() ? "waiting for user reply" : waiting_question,
+                waiting_question.empty() ? "Waiting for user input on task " + task.task_id 
+                                        : waiting_question,
                 50,
                 NowIso(),
                 session_key,
@@ -263,37 +381,58 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             return;
         }
 
+        // Step 3: Task completed successfully
         ClearActiveTask(local_agent);
+        
         relay_.UpdateTaskStatus(local_agent, task.task_id, {
             "completed",
-            "task completed",
+            "Task " + task.task_id + " finished successfully",
             100,
             NowIso(),
             session_key,
             result
         });
+
+        // Write completion memory
+        std::string result_summary = result;
+        if (result_summary.length() > 200) {
+            result_summary = result_summary.substr(0, 197) + "...";
+        }
+        WriteTaskMemory(workspace, task.task_id, project_name, "completed", 
+                       "Task finished successfully", result_summary);
+
     } catch (const std::exception& ex) {
         ClearActiveTask(local_agent);
+        
         relay_.UpdateTaskStatus(local_agent, task.task_id, {
             "failed",
-            ex.what(),
+            "Task " + task.task_id + " failed because " + ex.what(),
             -1,
             NowIso(),
             session_key,
             {},
             ex.what()
         });
+
+        // Write failure memory
+        WriteTaskMemory(workspace, task.task_id, project_name, "failed", 
+                       "Task failed", ex.what());
     } catch (...) {
         ClearActiveTask(local_agent);
+        
         relay_.UpdateTaskStatus(local_agent, task.task_id, {
             "failed",
-            "unknown task runtime error",
+            "Task " + task.task_id + " failed because unknown task runtime error",
             -1,
             NowIso(),
             session_key,
             {},
             "unknown task runtime error"
         });
+
+        // Write failure memory
+        WriteTaskMemory(workspace, task.task_id, project_name, "failed", 
+                       "Task failed with unknown error");
     }
 }
 

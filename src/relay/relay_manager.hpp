@@ -20,6 +20,13 @@ struct RelayTaskInteraction {
     std::string reply_to;
 };
 
+struct RelayTaskProject {
+    std::string project_id;
+    std::string name;
+    std::string description;
+    std::unordered_map<std::string, std::string> metadata;
+};
+
 struct RelayTask {
     std::string task_id;
     std::string title;
@@ -29,6 +36,16 @@ struct RelayTask {
     std::string priority;
     RelayTaskInteraction interaction;
     std::unordered_map<std::string, std::string> metadata;
+    // Project context
+    RelayTaskProject project;
+    // Dependency context
+    std::vector<std::string> depends_on_task_ids;
+    std::unordered_map<std::string, std::string> dependency_state;
+    std::vector<std::string> blocked_by_task_ids;
+    // Review/merge context
+    std::string merge_request;
+    // Waiting state
+    bool waiting_user = false;
 };
 
 struct RelayTaskClaimResult {
