@@ -46,8 +46,8 @@ std::optional<InboundProcessor::ProcessedMessage> InboundProcessor::Process(
 
 std::string InboundProcessor::ExtractText(const api::WeixinMessage& msg) {
   for (const auto& item : msg.item_list) {
-    if (item.item_type == api::MessageItemType::TEXT && item.content.has_value()) {
-      return item.content.value();
+    if (item.type == api::MessageItemType::TEXT && item.text_item.has_value()) {
+      return item.text_item.value().text;
     }
   }
   return "";

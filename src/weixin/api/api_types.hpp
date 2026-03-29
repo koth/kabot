@@ -41,13 +41,6 @@ enum class UploadMediaType : uint8_t {
   VOICE = 4
 };
 
-// Message content item
-struct MessageItem {
-  MessageItemType item_type = MessageItemType::NONE;
-  std::optional<std::string> item_id;
-  std::optional<std::string> content;
-};
-
 // CDN media reference
 struct CDNMedia {
   std::optional<std::string> encrypt_query_param;
@@ -55,14 +48,36 @@ struct CDNMedia {
   std::optional<std::string> full_url;
 };
 
-// Core message structure
+// Message content item (matches TypeScript)
+struct TextItem {
+  std::string text;
+};
+
+struct ImageItem {
+  std::string media_id;
+  std::optional<CDNMedia> media;
+};
+
+struct MessageItem {
+  MessageItemType type = MessageItemType::NONE;  // Field name is "type" not "item_type"
+  std::optional<TextItem> text_item;
+  std::optional<ImageItem> image_item;
+  // TODO: Add voice_item, file_item, video_item
+};
+
+// Core message structure (matches TypeScript implementation)
 struct WeixinMessage {
   std::optional<uint64_t> seq;
-  std::optional<uint64_t> message_id;
-  std::optional<std::string> from_user_id;
-  std::optional<std::string> to_user_id;
-  std::optional<std::string> context_token;
-  std::vector<MessageItem> item_list;
+  std::optional<uint64_t> message_id;  // Maps to msg_id in JSON
+  std::optional<std::string> client_id;
+  std::optional<std::string> session_id;
+  std::optional<std::string> group_id;
+  std::optional<std::string> from_user_id;  // Maps to from_username in JSON
+  std::optional<std::string> to_user_id;    // Maps to to_username in JSON
+  std::optional<std::string> context_token; // Maps to context in JSON
+  std::optional<MessageType> message_type;
+  std::optional<MessageState> message_state;
+  std::vector<MessageItem> item_list;  // Maps to msg_item_list in JSON
 };
 
 // API response structures
@@ -108,8 +123,11 @@ enum class QRCodeStatus {
 
 struct QRCodeStatusResponse {
   QRCodeStatus status;
-  std::optional<std::string> bot_info;
-  std::optional<std::string> redirect_url;
+  std::optional<std::string> bot_token;        // Direct token field
+  std::optional<std::string> ilink_bot_id;     // Bot ID from response
+  std::optional<std::string> baseurl;          // Base URL for API
+  std::optional<std::string> ilink_user_id;    // User ID
+  std::optional<std::string> redirect_host;    // Redirect host for IDC
   std::optional<std::string> error_msg;
 };
 

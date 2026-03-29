@@ -226,8 +226,8 @@ void WeixinChannel::ProcessMessage(const api::WeixinMessage& msg) {
   // Extract text content
   std::string text;
   for (const auto& item : msg.item_list) {
-    if (item.item_type == api::MessageItemType::TEXT && item.content.has_value()) {
-      text = item.content.value();
+    if (item.type == api::MessageItemType::TEXT && item.text_item.has_value()) {
+      text = item.text_item.value().text;
       break;
     }
   }

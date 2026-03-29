@@ -1,5 +1,6 @@
 #include "api/api_client.hpp"
 #include "util/random.hpp"
+#include "util/redact.hpp"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -80,13 +81,18 @@ std::string APIClient::GenerateWechatUin() const {
 APIResponse<std::vector<WeixinMessage>> APIClient::GetUpdates(
     const std::optional<std::string>& buffer,
     int timeout_seconds) {
-  std::string path = kBasePath;
-  path += "/get_updates?timeout=" + std::to_string(timeout_seconds);
+  // Use POST with JSON body to match TypeScript implementation
+  nlohmann::json body;
+  body["timeout"] = timeout_seconds * 1000;  // Convert to milliseconds
   if (buffer.has_value()) {
-    path += "&buf=" + buffer.value();
+    body["get_updates_buf"] = buffer.value();
   }
   
-  auto res = http_client_->Get(path.c_str());
+  auto res = http_client_->Post(
+      (std::string(kBasePath) + "/getupdates").c_str(),
+      body.dump(),
+      "application/json"
+  );
 
   if (!res) {
     APIResponse<std::vector<WeixinMessage>> error_result;
@@ -117,18 +123,20 @@ APIResponse<std::vector<WeixinMessage>> APIClient::GetUpdates(
     }
     
     std::vector<WeixinMessage> messages;
-    if (j.contains("message_list") && j["message_list"].is_array()) {
-      for (const auto& msg_json : j["message_list"]) {
+    // Parse messages from "msgs" array (TypeScript uses "msgs" not "message_list")
+    if (j.contains("msgs") && j["msgs"].is_array()) {
+      for (const auto& msg_json : j["msgs"]) {
         WeixinMessage msg;
-        if (msg_json.contains("message_id")) {
-          msg.message_id = msg_json["message_id"].get<uint64_t>();
+        if (msg_json.contains("msg_id")) {
+          msg.message_id = msg_json["msg_id"].get<uint64_t>();
         }
-        if (msg_json.contains("from_user_id")) {
-          msg.from_user_id = msg_json["from_user_id"].get<std::string>();
+        if (msg_json.contains("from_username")) {
+          msg.from_user_id = msg_json["from_username"].get<std::string>();
         }
-        if (msg_json.contains("context_token")) {
-          msg.context_token = msg_json["context_token"].get<std::string>();
+        if (msg_json.contains("context")) {
+          msg.context_token = msg_json["context"].get<std::string>();
         }
+        // TODO: Parse item_list from msg.msg_item_list
         messages.push_back(msg);
       }
     }
@@ -136,6 +144,7 @@ APIResponse<std::vector<WeixinMessage>> APIClient::GetUpdates(
     APIResponse<std::vector<WeixinMessage>> success_result;
     success_result.success = true;
     success_result.data = messages;
+    // TODO: Extract get_updates_buf from response for next poll
     return success_result;
   } catch (const std::exception& e) {
     APIResponse<std::vector<WeixinMessage>> error_result;
@@ -148,17 +157,30 @@ APIResponse<std::vector<WeixinMessage>> APIClient::GetUpdates(
 APIResponse<void> APIClient::SendTextMessage(const std::string& user_id,
                                               const std::string& context_token,
                                               const std::string& content) {
+  // Build message according to TypeScript structure
+  nlohmann::json msg;
+  msg["from_user_id"] = "";  // Empty for bot messages
+  msg["to_user_id"] = user_id;
+  msg["client_id"] = util::GenerateMessageId();
+  msg["message_type"] = static_cast<int>(MessageType::BOT);
+  msg["message_state"] = static_cast<int>(MessageState::FINISH);
+  msg["context"] = context_token;
+  
+  // Build item_list with text item
+  nlohmann::json item_list = nlohmann::json::array();
+  nlohmann::json text_item;
+  text_item["type"] = static_cast<int>(MessageItemType::TEXT);
+  text_item["text_item"] = nlohmann::json::object();
+  text_item["text_item"]["text"] = content;
+  item_list.push_back(text_item);
+  msg["msg_item_list"] = item_list;
+  
+  // Wrap in body with msg key
   nlohmann::json body;
-  body["to_user_id"] = user_id;
-  body["context_token"] = context_token;
-  body["item_list"] = nlohmann::json::array();
-  nlohmann::json item;
-  item["item_type"] = static_cast<int>(MessageItemType::TEXT);
-  item["content"] = content;
-  body["item_list"].push_back(item);
+  body["msg"] = msg;
   
   auto res = http_client_->Post(
-      (std::string(kBasePath) + "/send_message").c_str(),
+      (std::string(kBasePath) + "/sendmessage").c_str(),
       body.dump(),
       "application/json"
   );
@@ -213,8 +235,9 @@ APIResponse<UploadUrlData> APIClient::GetUploadUrl(UploadMediaType media_type,
 }
 
 APIResponse<QRCodeData> APIClient::GetQRCode() {
-  // Endpoint: ilink/bot/get_bot_qrcode?bot_type=xxx
-  std::string path = std::string(kBasePath) + "/get_bot_qrcode?bot_type=" + app_id_;
+  // Endpoint: ilink/bot/get_bot_qrcode?bot_type=3
+  // Note: bot_type is always "3" for this API, not the app_id
+  std::string path = std::string(kBasePath) + "/get_bot_qrcode?bot_type=3";
   auto res = http_client_->Get(path.c_str());
 
   if (!res) {
@@ -291,28 +314,37 @@ APIResponse<QRCodeStatusResponse> APIClient::GetQRCodeStatus(
 
     QRCodeStatusResponse status_response;
     
-    // Parse status string to enum
+    // Parse status string to enum (values from TypeScript reference)
     std::string status_str = j.value("status", "");
-    if (status_str == "PENDING") {
+    if (status_str == "wait") {
       status_response.status = QRCodeStatus::PENDING;
-    } else if (status_str == "SCANNED") {
+    } else if (status_str == "scaned") {
       status_response.status = QRCodeStatus::SCANNED;
-    } else if (status_str == "CONFIRMED") {
+    } else if (status_str == "confirmed") {
       status_response.status = QRCodeStatus::CONFIRMED;
-    } else if (status_str == "EXPIRED") {
+    } else if (status_str == "expired") {
       status_response.status = QRCodeStatus::EXPIRED;
-    } else if (status_str == "REDIRECT") {
+    } else if (status_str == "scaned_but_redirect") {
       status_response.status = QRCodeStatus::REDIRECT;
     } else {
       status_response.status = QRCodeStatus::PENDING;  // Default
     }
     
-    // Parse optional fields
-    if (j.contains("bot_info") && !j["bot_info"].is_null()) {
-      status_response.bot_info = j["bot_info"].get<std::string>();
+    // Parse optional fields (matching TypeScript field names)
+    if (j.contains("bot_token") && !j["bot_token"].is_null()) {
+      status_response.bot_token = j["bot_token"].get<std::string>();
     }
-    if (j.contains("redirect_url") && !j["redirect_url"].is_null()) {
-      status_response.redirect_url = j["redirect_url"].get<std::string>();
+    if (j.contains("ilink_bot_id") && !j["ilink_bot_id"].is_null()) {
+      status_response.ilink_bot_id = j["ilink_bot_id"].get<std::string>();
+    }
+    if (j.contains("baseurl") && !j["baseurl"].is_null()) {
+      status_response.baseurl = j["baseurl"].get<std::string>();
+    }
+    if (j.contains("ilink_user_id") && !j["ilink_user_id"].is_null()) {
+      status_response.ilink_user_id = j["ilink_user_id"].get<std::string>();
+    }
+    if (j.contains("redirect_host") && !j["redirect_host"].is_null()) {
+      status_response.redirect_host = j["redirect_host"].get<std::string>();
     }
     if (j.contains("error_msg") && !j["error_msg"].is_null()) {
       status_response.error_msg = j["error_msg"].get<std::string>();

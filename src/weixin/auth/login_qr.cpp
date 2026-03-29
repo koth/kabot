@@ -90,19 +90,20 @@ std::optional<std::string> QRLogin::PollStatus(int max_retries) {
         
       case api::QRCodeStatus::CONFIRMED:
         std::cout << "[weixin] Login confirmed!" << std::endl;
-        // Extract token from bot_info if available
-        if (status_response.bot_info.has_value()) {
-          // Parse bot_info JSON to extract token
-          try {
-            nlohmann::json bot_info = nlohmann::json::parse(status_response.bot_info.value());
-            if (bot_info.contains("token")) {
-              std::string token = bot_info["token"].get<std::string>();
-              std::cout << "[weixin] Token obtained successfully" << std::endl;
-              return token;
-            }
-          } catch (const std::exception& e) {
-            std::cerr << "[weixin] Failed to parse bot_info: " << e.what() << std::endl;
+        // Extract token from bot_token field (TypeScript compatible)
+        if (status_response.bot_token.has_value()) {
+          std::string token = status_response.bot_token.value();
+          std::cout << "[weixin] Token obtained successfully" << std::endl;
+          
+          // Store additional fields if available
+          if (status_response.ilink_bot_id.has_value()) {
+            std::cout << "[weixin] Bot ID: " << status_response.ilink_bot_id.value() << std::endl;
           }
+          if (status_response.baseurl.has_value()) {
+            std::cout << "[weixin] Base URL: " << status_response.baseurl.value() << std::endl;
+          }
+          
+          return token;
         }
         std::cerr << "[weixin] Login confirmed but no token in response" << std::endl;
         return std::nullopt;
@@ -113,8 +114,8 @@ std::optional<std::string> QRLogin::PollStatus(int max_retries) {
         
       case api::QRCodeStatus::REDIRECT:
         std::cerr << "[weixin] Redirect required: "
-                  << (status_response.redirect_url.has_value() 
-                      ? status_response.redirect_url.value() 
+                  << (status_response.redirect_host.has_value() 
+                      ? status_response.redirect_host.value() 
                       : "Unknown URL")
                   << std::endl;
         return std::nullopt;

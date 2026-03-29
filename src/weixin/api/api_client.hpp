@@ -65,7 +65,7 @@ private:
   std::string app_version_;
   std::unique_ptr<httplib::Client> http_client_;
   
-  static constexpr const char* kBasePath = "/cgi-bin/ilink/bot";
+  static constexpr const char* kBasePath = "/ilink/bot";
 };
 
 } // namespace weixin::api
