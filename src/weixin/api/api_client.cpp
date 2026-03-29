@@ -9,8 +9,11 @@
 #include <iostream>
 
 // Debug logging macros - will be disabled later
-#define WEIXIN_LOG_DEBUG(msg) std::cout << "[weixin:debug] " << msg << std::endl
-#define WEIXIN_LOG_INFO(msg) std::cout << "[weixin:info] " << msg << std::endl
+// #define WEIXIN_LOG_DEBUG(msg) std::cout << "[weixin:debug] " << msg << std::endl
+#define WEIXIN_LOG_DEBUG(msg)
+
+// #define WEIXIN_LOG_INFO(msg) std::cout << "[weixin:info] " << msg << std::endl
+#define WEIXIN_LOG_INFO(msg)
 #define WEIXIN_LOG_WARN(msg) std::cout << "[weixin:warn] " << msg << std::endl
 #define WEIXIN_LOG_ERROR(msg) std::cerr << "[weixin:error] " << msg << std::endl
 
