@@ -262,7 +262,7 @@ endif()
 add_executable(kabot_cli ${KABOT_SOURCES})
 target_link_libraries(kabot_cli PRIVATE kabot_core)
 if(KABOT_ENABLE_WEIXIN)
-  target_link_libraries(kabot_cli PRIVATE weixin_channel)
+  target_link_libraries(kabot_cli PRIVATE weixin_channel silk)
 endif()
 
 add_library(kabot_tts STATIC
