@@ -107,6 +107,12 @@ struct APIResponse<void> {
   bool IsSessionExpired() const { return error && error->IsSessionExpired(); }
 };
 
+// GetUpdates response includes messages and buffer for next poll
+struct GetUpdatesData {
+  std::vector<WeixinMessage> messages;
+  std::string next_buffer;  // get_updates_buf for next poll
+};
+
 // QR Code login structures
 struct QRCodeData {
   std::string qrcode;        // QR code token for polling

@@ -6,6 +6,13 @@
 #include <nlohmann/json.hpp>
 #include <iomanip>
 #include <sstream>
+#include <iostream>
+
+// Debug logging macros - will be disabled later
+#define WEIXIN_LOG_DEBUG(msg) std::cout << "[weixin:debug] " << msg << std::endl
+#define WEIXIN_LOG_INFO(msg) std::cout << "[weixin:info] " << msg << std::endl
+#define WEIXIN_LOG_WARN(msg) std::cout << "[weixin:warn] " << msg << std::endl
+#define WEIXIN_LOG_ERROR(msg) std::cerr << "[weixin:error] " << msg << std::endl
 
 namespace weixin::api {
 
@@ -78,53 +85,74 @@ std::string APIClient::GenerateWechatUin() const {
   return Uint32ToBase64(util::GenerateRandomUint32());
 }
 
-APIResponse<std::vector<WeixinMessage>> APIClient::GetUpdates(
+APIResponse<GetUpdatesData> APIClient::GetUpdates(
     const std::optional<std::string>& buffer,
     int timeout_seconds) {
+  WEIXIN_LOG_DEBUG("GetUpdates: Starting poll, buffer length=" << buffer.value_or("").length());
+  
   // Use POST with JSON body to match TypeScript implementation
   nlohmann::json body;
-  body["timeout"] = timeout_seconds * 1000;  // Convert to milliseconds
-  if (buffer.has_value()) {
-    body["get_updates_buf"] = buffer.value();
-  }
-  
+  body["get_updates_buf"] = buffer.value_or("");  // Always include, empty string if none
+
+  // Add base_info with channel_version (required by API)
+  nlohmann::json base_info;
+  base_info["channel_version"] = app_version_;
+  body["base_info"] = base_info;
+
+  std::string body_str = body.dump();
+  WEIXIN_LOG_DEBUG("GetUpdates: Request body=" << body_str);
+
+  // Set HTTP timeout (timeout_seconds is for HTTP client, not sent in body)
+  http_client_->set_read_timeout(timeout_seconds);
+
+  WEIXIN_LOG_DEBUG("GetUpdates: Sending POST to " << kBasePath << "/getupdates");
   auto res = http_client_->Post(
       (std::string(kBasePath) + "/getupdates").c_str(),
-      body.dump(),
+      body_str,
       "application/json"
   );
 
   if (!res) {
-    APIResponse<std::vector<WeixinMessage>> error_result;
+    WEIXIN_LOG_ERROR("GetUpdates: Network error - no response");
+    APIResponse<GetUpdatesData> error_result;
     error_result.success = false;
     error_result.error = APIError{-1, "Network error"};
     return error_result;
   }
+  
+  WEIXIN_LOG_DEBUG("GetUpdates: Response status=" << res->status << ", body length=" << res->body.length());
 
   if (res->status != 200) {
-    APIResponse<std::vector<WeixinMessage>> error_result;
+    APIResponse<GetUpdatesData> error_result;
     error_result.success = false;
-    error_result.error = APIError{static_cast<int>(res->status), "HTTP error: " + std::to_string(res->status)};
+    error_result.error = APIError{static_cast<int>(res->status), "HTTP error: " + std::to_string(res->status) + " body: " + res->body};
     return error_result;
   }
-  
+
   try {
     auto j = nlohmann::json::parse(res->body);
-    
-    if (j.contains("errcode") && j["errcode"].get<int>() != 0) {
+    WEIXIN_LOG_DEBUG("GetUpdates: Parsed JSON response");
+
+    // Check for API error (using "ret" field as in TypeScript)
+    if (j.contains("ret") && j["ret"].get<int>() != 0) {
+      WEIXIN_LOG_ERROR("GetUpdates: API error ret=" << j["ret"].get<int>() << ", errmsg=" << j.value("errmsg", "unknown"));
       APIError error{
-        j["errcode"].get<int>(),
+        j["ret"].get<int>(),
         j.value("errmsg", "Unknown error")
       };
-      APIResponse<std::vector<WeixinMessage>> result;
+      APIResponse<GetUpdatesData> result;
       result.success = false;
       result.error = error;
       return result;
     }
-    
-    std::vector<WeixinMessage> messages;
+
+    GetUpdatesData data;
+
     // Parse messages from "msgs" array (TypeScript uses "msgs" not "message_list")
     if (j.contains("msgs") && j["msgs"].is_array()) {
+      size_t msg_count = j["msgs"].size();
+      WEIXIN_LOG_INFO("GetUpdates: Received " << msg_count << " messages");
+      
       for (const auto& msg_json : j["msgs"]) {
         WeixinMessage msg;
         if (msg_json.contains("msg_id")) {
@@ -133,21 +161,50 @@ APIResponse<std::vector<WeixinMessage>> APIClient::GetUpdates(
         if (msg_json.contains("from_username")) {
           msg.from_user_id = msg_json["from_username"].get<std::string>();
         }
+        if (msg_json.contains("to_username")) {
+          msg.to_user_id = msg_json["to_username"].get<std::string>();
+        }
         if (msg_json.contains("context")) {
           msg.context_token = msg_json["context"].get<std::string>();
         }
-        // TODO: Parse item_list from msg.msg_item_list
-        messages.push_back(msg);
+        // Parse msg_item_list for content
+        if (msg_json.contains("msg_item_list") && msg_json["msg_item_list"].is_array()) {
+          for (const auto& item_json : msg_json["msg_item_list"]) {
+            MessageItem item;
+            if (item_json.contains("type")) {
+              int type_val = item_json["type"].get<int>();
+              item.type = static_cast<MessageItemType>(type_val);
+            }
+            // Parse text item
+            if (item_json.contains("text_item") && !item_json["text_item"].is_null()) {
+              TextItem text;
+              if (item_json["text_item"].contains("text")) {
+                text.text = item_json["text_item"]["text"].get<std::string>();
+              }
+              item.text_item = text;
+            }
+            msg.item_list.push_back(item);
+          }
+        }
+        data.messages.push_back(msg);
       }
     }
 
-    APIResponse<std::vector<WeixinMessage>> success_result;
+    // Extract get_updates_buf for next poll (CRITICAL!)
+    if (j.contains("get_updates_buf") && !j["get_updates_buf"].is_null()) {
+      data.next_buffer = j["get_updates_buf"].get<std::string>();
+      WEIXIN_LOG_DEBUG("GetUpdates: Extracted buffer, length=" << data.next_buffer.length());
+    } else {
+      WEIXIN_LOG_WARN("GetUpdates: No get_updates_buf in response!");
+    }
+
+    WEIXIN_LOG_INFO("GetUpdates: Success, processed " << data.messages.size() << " messages");
+    APIResponse<GetUpdatesData> success_result;
     success_result.success = true;
-    success_result.data = messages;
-    // TODO: Extract get_updates_buf from response for next poll
+    success_result.data = data;
     return success_result;
   } catch (const std::exception& e) {
-    APIResponse<std::vector<WeixinMessage>> error_result;
+    APIResponse<GetUpdatesData> error_result;
     error_result.success = false;
     error_result.error = APIError{-1, std::string("Parse error: ") + e.what()};
     return error_result;

@@ -29,7 +29,7 @@ public:
   ~APIClient();
 
   // Long-polling for updates
-  APIResponse<std::vector<WeixinMessage>> GetUpdates(
+  APIResponse<GetUpdatesData> GetUpdates(
       const std::optional<std::string>& buffer,
       int timeout_seconds = 30);
 
