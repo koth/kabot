@@ -105,7 +105,7 @@ void WeixinChannel::Stop() {
 }
 
 bool WeixinChannel::Send(const kabot::bus::OutboundMessage& msg) {
-  std::cout << "[weixin:info] Send: Called with chat_id=" << msg.chat_id << ", reply_to=" << msg.reply_to << std::endl;
+  //std::cout << "[weixin:info] Send: Called with chat_id=" << msg.chat_id << ", reply_to=" << msg.reply_to << std::endl;
   
   if (!api_client_) {
     std::cout << "[weixin:error] Send: api_client_ is null" << std::endl;
@@ -125,7 +125,7 @@ bool WeixinChannel::Send(const kabot::bus::OutboundMessage& msg) {
     auto it = chat_id_map_.find(msg.reply_to);
     if (it != chat_id_map_.end()) {
       chat_id = it->second;
-      std::cout << "[weixin:debug] Send: Found chat_id from reply_to=" << chat_id << std::endl;
+     // std::cout << "[weixin:debug] Send: Found chat_id from reply_to=" << chat_id << std::endl;
     }
   }
   
@@ -134,7 +134,7 @@ bool WeixinChannel::Send(const kabot::bus::OutboundMessage& msg) {
     return false;
   }
   
-  std::cout << "[weixin:info] Send: Sending to chat_id=" << chat_id << ", content_length=" << msg.content.length() << std::endl;
+  //std::cout << "[weixin:info] Send: Sending to chat_id=" << chat_id << ", content_length=" << msg.content.length() << std::endl;
   
   // Get context token
   storage::ContextTokenStore token_store(account_.account_id);
@@ -143,10 +143,10 @@ bool WeixinChannel::Send(const kabot::bus::OutboundMessage& msg) {
   // Convert markdown to plain text
   std::string text = ConvertMarkdownToText(msg.content);
   
-  std::cout << "[weixin:debug] Send: context_token=" << (context_token.has_value() ? "present" : "empty") << std::endl;
+  //std::cout << "[weixin:debug] Send: context_token=" << (context_token.has_value() ? "present" : "empty") << std::endl;
   
   // Send message
-  std::cout << "[weixin:info] Send: Calling SendTextMessage" << std::endl;
+  //std::cout << "[weixin:info] Send: Calling SendTextMessage" << std::endl;
   auto result = api_client_->SendTextMessage(
       chat_id,
       context_token.value_or(""),
@@ -154,7 +154,7 @@ bool WeixinChannel::Send(const kabot::bus::OutboundMessage& msg) {
   );
   
   if (result.success) {
-    std::cout << "[weixin:info] Send: Message sent successfully" << std::endl;
+    //std::cout << "[weixin:info] Send: Message sent successfully" << std::endl;
   } else {
     std::cout << "[weixin:error] Send: Failed to send message";
     if (result.error.has_value()) {
@@ -169,8 +169,8 @@ bool WeixinChannel::Send(const kabot::bus::OutboundMessage& msg) {
 void WeixinChannel::PollLoop() {
   monitor::ConnectionManager conn_mgr;
 
-  std::cout << "[weixin:info] PollLoop: Starting message polling loop" << std::endl;
-  std::cout << "[weixin:info] PollLoop: Initial buffer length=" << sync_buffer_.length() << std::endl;
+  //std::cout << "[weixin:info] PollLoop: Starting message polling loop" << std::endl;
+  //std::cout << "[weixin:info] PollLoop: Initial buffer length=" << sync_buffer_.length() << std::endl;
 
   while (running_ && polling_) {
     // Check if we should pause (session expired, etc.)
@@ -191,7 +191,7 @@ void WeixinChannel::PollLoop() {
       continue;
     }
 
-    std::cout << "[weixin:debug] PollLoop: Calling GetUpdates with buffer length=" << sync_buffer_.length() << std::endl;
+    //std::cout << "[weixin:debug] PollLoop: Calling GetUpdates with buffer length=" << sync_buffer_.length() << std::endl;
     auto result = api_client_->GetUpdates(
         sync_buffer_.empty() ? std::nullopt : std::make_optional(sync_buffer_),
         30  // 30 second timeout
@@ -203,28 +203,28 @@ void WeixinChannel::PollLoop() {
       // CRITICAL: Save the buffer for next poll (this is how we track position)
       if (result.data.has_value()) {
         const auto& data = result.data.value();
-        std::cout << "[weixin:info] PollLoop: GetUpdates succeeded, received " << data.messages.size() << " messages" << std::endl;
+        //std::cout << "[weixin:info] PollLoop: GetUpdates succeeded, received " << data.messages.size() << " messages" << std::endl;
 
         // Update sync buffer with new buffer from server
         if (!data.next_buffer.empty()) {
           sync_buffer_ = data.next_buffer;
-          std::cout << "[weixin:debug] PollLoop: Updated buffer, new length=" << sync_buffer_.length() << std::endl;
+          //std::cout << "[weixin:debug] PollLoop: Updated buffer, new length=" << sync_buffer_.length() << std::endl;
 
           // Save to storage for resume
           storage::SyncBuffer sync_store(account_.account_id);
           sync_store.Save(sync_buffer_);
-          std::cout << "[weixin:debug] PollLoop: Saved buffer to storage" << std::endl;
+         // std::cout << "[weixin:debug] PollLoop: Saved buffer to storage" << std::endl;
         } else {
           std::cout << "[weixin:warn] PollLoop: Response has empty buffer!" << std::endl;
         }
 
         // Process messages
         for (size_t i = 0; i < data.messages.size(); ++i) {
-          std::cout << "[weixin:debug] PollLoop: Processing message " << (i + 1) << "/" << data.messages.size() << std::endl;
+         // std::cout << "[weixin:debug] PollLoop: Processing message " << (i + 1) << "/" << data.messages.size() << std::endl;
           ProcessMessage(data.messages[i]);
         }
       } else {
-        std::cout << "[weixin:debug] PollLoop: GetUpdates success but no data" << std::endl;
+        //std::cout << "[weixin:debug] PollLoop: GetUpdates success but no data" << std::endl;
       }
     } else {
       int delay_ms = 0;
@@ -261,7 +261,7 @@ void WeixinChannel::PollLoop() {
 }
 
 void WeixinChannel::ProcessMessage(const api::WeixinMessage& msg) {
-  std::cout << "[weixin:debug] ProcessMessage: Started processing message" << std::endl;
+  //std::cout << "[weixin:debug] ProcessMessage: Started processing message" << std::endl;
 
   if (!msg.from_user_id.has_value()) {
     std::cout << "[weixin:warn] ProcessMessage: Message has no from_user_id, skipping" << std::endl;
@@ -269,7 +269,7 @@ void WeixinChannel::ProcessMessage(const api::WeixinMessage& msg) {
   }
 
   std::string user_id = msg.from_user_id.value();
-  std::cout << "[weixin:debug] ProcessMessage: From user=" << user_id << std::endl;
+  //std::cout << "[weixin:debug] ProcessMessage: From user=" << user_id << std::endl;
 
   // Check if user is allowed
   if (!IsAllowed(user_id)) {
@@ -279,7 +279,7 @@ void WeixinChannel::ProcessMessage(const api::WeixinMessage& msg) {
 
   // Save context token
   if (msg.context_token.has_value()) {
-    std::cout << "[weixin:debug] ProcessMessage: Saving context token for user=" << user_id << std::endl;
+    //std::cout << "[weixin:debug] ProcessMessage: Saving context token for user=" << user_id << std::endl;
     storage::ContextTokenStore token_store(account_.account_id);
     token_store.Save(user_id, msg.context_token.value());
     context_tokens_[user_id] = msg.context_token.value();
@@ -289,12 +289,12 @@ void WeixinChannel::ProcessMessage(const api::WeixinMessage& msg) {
 
   // Extract text content
   std::string text;
-  std::cout << "[weixin:debug] ProcessMessage: Processing " << msg.item_list.size() << " message items" << std::endl;
+  //std::cout << "[weixin:debug] ProcessMessage: Processing " << msg.item_list.size() << " message items" << std::endl;
   for (const auto& item : msg.item_list) {
-    std::cout << "[weixin:debug] ProcessMessage: Item type=" << static_cast<int>(item.type) << std::endl;
+   // std::cout << "[weixin:debug] ProcessMessage: Item type=" << static_cast<int>(item.type) << std::endl;
     if (item.type == api::MessageItemType::TEXT && item.text_item.has_value()) {
       text = item.text_item.value().text;
-      std::cout << "[weixin:info] ProcessMessage: Extracted text message, length=" << text.length() << std::endl;
+      //std::cout << "[weixin:info] ProcessMessage: Extracted text message, length=" << text.length() << std::endl;
       break;
     }
   }
@@ -304,7 +304,7 @@ void WeixinChannel::ProcessMessage(const api::WeixinMessage& msg) {
   if (msg.message_id.has_value()) {
     message_id = std::to_string(msg.message_id.value());
     chat_id_map_[message_id] = user_id;
-    std::cout << "[weixin:debug] ProcessMessage: Message ID=" << message_id << std::endl;
+    //std::cout << "[weixin:debug] ProcessMessage: Message ID=" << message_id << std::endl;
   } else {
     std::cout << "[weixin:warn] ProcessMessage: Message has no ID" << std::endl;
   }
@@ -314,10 +314,10 @@ void WeixinChannel::ProcessMessage(const api::WeixinMessage& msg) {
   metadata["message_id"] = message_id;
   metadata["user_id"] = user_id;
 
-  std::cout << "[weixin:info] ProcessMessage: Publishing message to bus, user=" << user_id << ", text_length=" << text.length() << std::endl;
+  //std::cout << "[weixin:info] ProcessMessage: Publishing message to bus, user=" << user_id << ", text_length=" << text.length() << std::endl;
   // Publish to message bus
   HandleMessage(user_id, user_id, text, {}, metadata);
-  std::cout << "[weixin:debug] ProcessMessage: Message published successfully" << std::endl;
+  //std::cout << "[weixin:debug] ProcessMessage: Message published successfully" << std::endl;
 }
 
 std::string WeixinChannel::ConvertMarkdownToText(const std::string& markdown) {
