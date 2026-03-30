@@ -540,7 +540,11 @@ void TaskRuntime::EnsureDailySummaryJobs() {
         job.payload.agent = local_agent;
         job.payload.message = "upload daily memory";
         const auto added = cron_->AddJob(job);
-        cron_job_ids_.push_back(added.id);
+        if (added.has_value()) {
+            cron_job_ids_.push_back(added->id);
+        } else {
+            LOG_ERROR("[task_runtime] Failed to add daily summary cron job");
+        }
     }
 }
 

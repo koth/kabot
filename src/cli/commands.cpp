@@ -41,10 +41,6 @@
 #include "nlohmann/json.hpp"
 #include "utils/logging.hpp"
 
-#ifdef KABOT_ENABLE_WEIXIN
-#include "weixin/auth/login_qr.hpp"
-#endif
-
 namespace {
 
 std::atomic<bool> g_running{true};
@@ -544,19 +540,8 @@ int main(int argc, char** argv) {
         return HupGateway();
     }
 
-#ifdef KABOT_ENABLE_WEIXIN
-    if (argc >= 2 && std::string(argv[1]) == "weixin-login") {
-        std::string account_id = (argc >= 3) ? argv[2] : "default";
-        std::string base_url = "https://ilinkai.weixin.qq.com";
-        
-        std::cout << "Starting WeChat QR code login for account: " << account_id << std::endl;
-        bool success = weixin::auth::PerformQRLogin(account_id, base_url);
-        return success ? 0 : 1;
-    }
-#endif
-
     if (argc < 2) {
-        LOG_INFO("Usage: kabot_cli gateway | kabot_cli restart | kabot_cli hup | kabot_cli weixin-login [account_id] | kabot_cli \"message\"");
+        LOG_INFO("Usage: kabot_cli gateway | kabot_cli restart | kabot_cli hup | kabot_cli \"message\"");
         return 1;
     }
 
