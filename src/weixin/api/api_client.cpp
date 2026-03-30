@@ -133,26 +133,8 @@ APIResponse<GetUpdatesData> APIClient::GetUpdates(
   }
 
   try {
-    // Check for empty response body
-    if (res->body.empty()) {
-      WEIXIN_LOG_ERROR("GetUpdates: Empty response body");
-      APIResponse<GetUpdatesData> error_result;
-      error_result.success = false;
-      error_result.error = APIError{-1, "Empty response body from server"};
-      return error_result;
-    }
-    
     auto j = nlohmann::json::parse(res->body);
     WEIXIN_LOG_DEBUG("GetUpdates: Parsed JSON response");
-    
-    // Check if response is null or not an object
-    if (j.is_null() || !j.is_object()) {
-      WEIXIN_LOG_ERROR("GetUpdates: Invalid JSON response - not an object");
-      APIResponse<GetUpdatesData> error_result;
-      error_result.success = false;
-      error_result.error = APIError{-1, "Invalid JSON response format"};
-      return error_result;
-    }
 
     // Check for API error (using "ret" field as in TypeScript)
     if (j.contains("ret") && j["ret"].get<int>() != 0) {

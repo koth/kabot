@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(kabot LANGUAGES CXX)
+project(kabot LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,6 +58,7 @@ endif()
 option(KABOT_ENABLE_TELEGRAM "Enable Telegram channel support" ON)
 option(KABOT_ENABLE_LARK "Enable Lark channel support" ON)
 option(KABOT_ENABLE_QQBOT "Enable QQBot channel support" ON)
+option(KABOT_ENABLE_WEIXIN "Enable Weixin channel support" ON)
 option(KABOT_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 
 
@@ -213,6 +214,10 @@ if(KABOT_ENABLE_QQBOT)
   target_link_libraries(kabot_core INTERFACE qqbot_sdk)
 endif()
 
+if(KABOT_ENABLE_WEIXIN)
+  add_subdirectory(weixin)
+endif()
+
 # 收集所有源文件
 set(KABOT_SOURCES
   cli/commands.cpp
@@ -256,6 +261,9 @@ endif()
 
 add_executable(kabot_cli ${KABOT_SOURCES})
 target_link_libraries(kabot_cli PRIVATE kabot_core)
+if(KABOT_ENABLE_WEIXIN)
+  target_link_libraries(kabot_cli PRIVATE weixin_channel silk)
+endif()
 
 add_library(kabot_tts STATIC
   agent/tools/tts.cpp

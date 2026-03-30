@@ -304,14 +304,11 @@ std::string CronTool::Execute(const std::unordered_map<std::string, std::string>
         }
 
         const auto added = cron_->AddJob(job);
-        if (!added.has_value()) {
-            return "Error: Failed to create cron job - invalid schedule expression or time in the past";
-        }
         nlohmann::json json = {
-            {"id", added->id},
-            {"enabled", added->enabled},
-            {"next_run_at_ms", added->state.next_run_at_ms.has_value() ? nlohmann::json(*added->state.next_run_at_ms)
-                                                                        : nlohmann::json(nullptr)}
+            {"id", added.id},
+            {"enabled", added.enabled},
+            {"next_run_at_ms", added.state.next_run_at_ms.has_value() ? nlohmann::json(*added.state.next_run_at_ms)
+                                                                      : nlohmann::json(nullptr)}
         };
         return json.dump(2);
     }

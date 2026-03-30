@@ -322,6 +322,49 @@ void ApplyQQBotConfig(QQBotConfig& target, const nlohmann::json& source) {
     }
 }
 
+void ApplyWeixinConfig(WeixinConfig& target, const nlohmann::json& source) {
+    if (!source.is_object()) {
+        return;
+    }
+    if (source.contains("name") && source["name"].is_string()) {
+        target.name = source["name"].get<std::string>();
+    }
+    if (source.contains("enabled") && source["enabled"].is_boolean()) {
+        target.enabled = source["enabled"].get<bool>();
+    }
+    // Note: token is NOT loaded from config file.
+    // It is obtained via QR code login and stored in ~/.kabot/
+    if (source.contains("accountId") && source["accountId"].is_string()) {
+        target.account_id = source["accountId"].get<std::string>();
+    }
+    if (source.contains("baseUrl") && source["baseUrl"].is_string()) {
+        target.base_url = source["baseUrl"].get<std::string>();
+    }
+    if (source.contains("cdnBaseUrl") && source["cdnBaseUrl"].is_string()) {
+        target.cdn_base_url = source["cdnBaseUrl"].get<std::string>();
+    }
+    if (source.contains("routeTag") && source["routeTag"].is_number_integer()) {
+        target.route_tag = source["routeTag"].get<int>();
+    }
+    if (source.contains("appId") && source["appId"].is_string()) {
+        target.app_id = source["appId"].get<std::string>();
+    }
+    if (source.contains("appVersion") && source["appVersion"].is_string()) {
+        target.app_version = source["appVersion"].get<std::string>();
+    }
+    if (source.contains("allowFrom") && source["allowFrom"].is_array()) {
+        target.allow_from.clear();
+        for (const auto& item : source["allowFrom"]) {
+            if (item.is_string()) {
+                target.allow_from.push_back(item.get<std::string>());
+            }
+        }
+    }
+    if (source.contains("binding")) {
+        ApplyBindingConfig(target.binding, source["binding"]);
+    }
+}
+
 void NormalizeConfig(Config& config, const AgentDefaults& previous_defaults) {
     if (config.agents.instances.empty()) {
         AgentInstanceConfig agent{};
@@ -420,6 +463,17 @@ void NormalizeConfig(Config& config, const AgentDefaults& previous_defaults) {
             instance.qqbot.name = instance.name;
             config.channels.instances.push_back(instance);
         }
+        if (config.channels.weixin.enabled) {
+            ChannelInstanceConfig instance{};
+            instance.name = config.channels.weixin.name.empty() ? "weixin" : config.channels.weixin.name;
+            instance.type = "weixin";
+            instance.enabled = config.channels.weixin.enabled;
+            instance.allow_from = config.channels.weixin.allow_from;
+            instance.binding = config.channels.weixin.binding;
+            instance.weixin = config.channels.weixin;
+            instance.weixin.name = instance.name;
+            config.channels.instances.push_back(instance);
+        }
     }
 
     for (auto& instance : config.channels.instances) {
@@ -454,6 +508,18 @@ void NormalizeConfig(Config& config, const AgentDefaults& previous_defaults) {
             }
             instance.enabled = instance.enabled && !instance.qqbot.app_id.empty()
                 && (!instance.qqbot.client_secret.empty() || !instance.qqbot.token.empty());
+        } else if (instance.type == "weixin") {
+            if (instance.name.empty()) {
+                instance.name = instance.weixin.name.empty() ? "weixin" : instance.weixin.name;
+            }
+            instance.weixin.name = instance.name;
+            instance.allow_from = instance.allow_from.empty() ? instance.weixin.allow_from : instance.allow_from;
+            if (instance.binding.agent.empty()) {
+                instance.binding = instance.weixin.binding;
+            }
+            // Token is obtained via QR code login and stored in ~/.openclaw/accounts/
+            // Enabled if account_id is set (which determines where to load token from)
+            instance.enabled = instance.enabled && !instance.weixin.account_id.empty();
         }
 
         if (instance.binding.agent.empty()) {
@@ -531,6 +597,9 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         if (channels.contains("qqbot") && channels["qqbot"].is_object()) {
             ApplyQQBotConfig(config.channels.qqbot, channels["qqbot"]);
         }
+        if (channels.contains("weixin") && channels["weixin"].is_object()) {
+            ApplyWeixinConfig(config.channels.weixin, channels["weixin"]);
+        }
         if (channels.contains("instances") && channels["instances"].is_array()) {
             config.channels.instances.clear();
             for (const auto& item : channels["instances"]) {
@@ -566,6 +635,9 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
                 } else if (instance.type == "qqbot") {
                     instance.qqbot = config.channels.qqbot;
                     ApplyQQBotConfig(instance.qqbot, item);
+                } else if (instance.type == "weixin") {
+                    instance.weixin = config.channels.weixin;
+                    ApplyWeixinConfig(instance.weixin, item);
                 }
                 config.channels.instances.push_back(instance);
             }
@@ -1125,7 +1197,7 @@ std::vector<std::string> ValidateConfig(const Config& config) {
         } else if (!channel_names.insert(channel.name).second) {
             errors.push_back("duplicate channel instance name: " + channel.name);
         }
-        if (channel.type != "telegram" && channel.type != "lark" && channel.type != "qqbot") {
+        if (channel.type != "telegram" && channel.type != "lark" && channel.type != "qqbot" && channel.type != "weixin") {
             errors.push_back("unsupported channel type for instance " + channel.name + ": " + channel.type);
         }
         if (channel.type == "qqbot") {
@@ -1134,6 +1206,13 @@ std::vector<std::string> ValidateConfig(const Config& config) {
             }
             if (channel.qqbot.client_secret.empty() && channel.qqbot.token.empty()) {
                 errors.push_back("qqbot channel instance " + channel.name + " requires clientSecret or token");
+            }
+        }
+        if (channel.type == "weixin") {
+            // Token is obtained via QR code login and stored in ~/.kabot/accounts/
+            // account_id determines which account file to load the token from
+            if (channel.weixin.account_id.empty()) {
+                errors.push_back("weixin channel instance " + channel.name + " is missing account_id");
             }
         }
         if (channel.binding.agent.empty()) {
