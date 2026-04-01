@@ -393,11 +393,11 @@ LLMResponse LiteLLMProvider::Chat(
                  (use_anthropic ? "anthropic" : "openai"));
 
         httplib::Headers headers{{"Content-Type", "application/json"}};
-        headers.emplace("User-Agent", "claude-code/0.1.0");
+        headers.emplace("User-Agent", "claude-code/0.2.0");
         if (!api_key_.empty()) {
             if (use_anthropic) {
                 headers.emplace("x-api-key", api_key_);
-                headers.emplace("anthropic-version", "2023-06-01");
+                // headers.emplace("anthropic-version", "2023-06-01");
             } else {
                 headers.emplace("Authorization", "Bearer " + api_key_);
             }
