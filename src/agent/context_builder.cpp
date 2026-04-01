@@ -44,45 +44,18 @@ std::string ContextBuilder::BuildSystemPrompt(
     oss << "When generating commands for shell-like tools, prefer POSIX shell syntax.\n";
     oss << "Do not assume PowerShell syntax.\n\n";
 #endif
-    const auto now = std::chrono::system_clock::now();
-    const auto now_time = std::chrono::system_clock::to_time_t(now);
-    std::tm now_tm{};
-#if defined(_WIN32)
-    localtime_s(&now_tm, &now_time);
-#else
-    localtime_r(&now_time, &now_tm);
-#endif
-    oss << "Current time: " << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S %Z") << "\n\n";
 
     const auto bootstrap = LoadBootstrapFiles();
     if (!bootstrap.empty()) {
         oss << bootstrap << "\n\n";
     }
 
-    std::string memory;
-    if (qmd_.enabled) {
-        LOG_DEBUG("[context] memory=QMD");
-        if (!current_message.empty()) {
-            LOG_DEBUG("[context] qmd_query={}", current_message);
-            memory = BuildQmdContext(current_message);
-            if (!memory.empty() && false) {
-                LOG_DEBUG("[context] qmd_memory\n{}", memory);
-            }
-        }
-    } else {
-        LOG_DEBUG("[context] memory=FULL");
-        memory = memory_.GetMemoryContext();
-    }
-    if (!memory.empty()) {
-        oss << "# Memory\n\n" << memory << "\n\n";
-    }
+    
 
     oss << "## Tool Use\n";
     oss << "When the user asks you to inspect files, read code, modify code, write files, run commands, browse the web, fetch external data, send messages, or schedule work, do not claim the task is completed unless you have already called the relevant tool and received its result.\n";
     oss << "If tools are required but unavailable or insufficient, explicitly say what is missing instead of pretending success.\n";
     oss << "If you are giving reasoning or advice without executing anything, make that distinction explicit.\n\n";
-
-
 
     oss << "## Memory Writing\n";
     oss << "Only record durable information: preferences, long-term facts, goal changes, key conclusions, task summaries.\n";
@@ -108,6 +81,35 @@ std::string ContextBuilder::BuildSystemPrompt(
         oss << "# Skills\n\n";
         oss << "The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.\n\n";
         oss << summary << "\n";
+    }
+
+    const auto now = std::chrono::system_clock::now();
+    const auto now_time = std::chrono::system_clock::to_time_t(now);
+    std::tm now_tm{};
+#if defined(_WIN32)
+    localtime_s(&now_tm, &now_time);
+#else
+    localtime_r(&now_time, &now_tm);
+#endif
+    oss << "Current time: " << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S %Z") << "\n\n";
+
+
+    std::string memory;
+    if (qmd_.enabled) {
+        LOG_DEBUG("[context] memory=QMD");
+        if (!current_message.empty()) {
+            LOG_DEBUG("[context] qmd_query={}", current_message);
+            memory = BuildQmdContext(current_message);
+            if (!memory.empty() && false) {
+                LOG_DEBUG("[context] qmd_memory\n{}", memory);
+            }
+        }
+    } else {
+        LOG_DEBUG("[context] memory=FULL");
+        memory = memory_.GetMemoryContext();
+    }
+    if (!memory.empty()) {
+        oss << "# Memory\n\n" << memory << "\n\n";
     }
 
     return oss.str();
