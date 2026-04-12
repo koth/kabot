@@ -198,8 +198,8 @@ std::string StripMarkdownFences(std::string content) {
 std::string NormalizePriority(const std::string& raw) {
     static const std::unordered_map<std::string, std::string> kMap = {
         {"low", "low"},
-        {"normal", "normal"},
-        {"medium", "normal"},
+        {"normal", "medium"},
+        {"medium", "medium"},
         {"high", "high"},
         {"urgent", "high"},
         {"critical", "high"},
@@ -207,10 +207,14 @@ std::string NormalizePriority(const std::string& raw) {
     };
     std::string lower;
     lower.reserve(raw.size());
-    for (unsigned char ch : raw) lower.push_back(static_cast<char>(std::tolower(ch)));
+    for (unsigned char ch : raw) {
+        lower.push_back(static_cast<char>(std::tolower(ch)));
+    }
     auto it = kMap.find(lower);
-    if (it != kMap.end()) return it->second;
-    return "normal";
+    if (it != kMap.end()) {
+        return it->second;
+    }
+    return "medium";
 }
 
 }  // namespace
