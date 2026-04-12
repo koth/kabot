@@ -31,7 +31,7 @@ void PlanWorkTool::SetRelayManager(kabot::relay::RelayManager* relay_manager) {
 }
 
 std::string PlanWorkTool::Description() const {
-    return "Decompose a high-level project instruction into a structured list of tasks and optionally submit them to the relay server.";
+    return "Decompose a high-level project instruction into a structured list of tasks and submit them to the relay server by default.";
 }
 
 std::string PlanWorkTool::ParametersJson() const {
@@ -44,8 +44,8 @@ std::string PlanWorkTool::ParametersJson() const {
             },
             "mode": {
                 "type": "string",
-                "enum": ["plan_only", "plan_and_submit"],
-                "description": "plan_only returns the preview; plan_and_submit pushes tasks to relay"
+                "enum": ["plan_and_submit", "plan_only"],
+                "description": "Controls whether to submit the generated tasks. Defaults to plan_and_submit. Only use plan_only when the user explicitly asks for a preview without submitting tasks."
             },
             "project_context": {
                 "type": "object",
