@@ -15,6 +15,7 @@
 #include "config/config_schema.hpp"
 #include "cron/cron_service.hpp"
 #include "relay/relay_manager.hpp"
+#include "utils/thread_pool.hpp"
 
 namespace kabot::task {
 
@@ -62,13 +63,14 @@ private:
         std::string session_key;
     };
 
-    void PollLoop();
+    void AgentPollLoop(const std::string& local_agent);
     void ExecuteClaimedTask(const std::string& local_agent,
                             const kabot::relay::RelayTask& task);
     bool ResumeWaitingTask(const WaitingTask& waiting_task,
                            const std::string& user_reply,
                            std::string& final_result);
     bool HasPendingTaskForLocalAgent(const std::string& local_agent) const;
+    bool IsTaskClaimed(const std::string& task_id) const;
     void MarkActiveTask(const std::string& local_agent,
                         const std::string& task_id,
                         const std::string& session_key);
@@ -85,10 +87,15 @@ private:
                            const kabot::bus::OutboundMessage& outbound) const;
     void LoadState();
     void SaveState() const;
+    void SaveWaitingTasks() const;
+    void SaveDailySummaries() const;
+    void LoadWaitingTasks();
+    void LoadDailySummaries();
 
     std::string SummaryJobId(const std::string& local_agent) const;
     std::string WaitingKey(const kabot::bus::InboundMessage& msg) const;
-    std::filesystem::path StatePath() const;
+    std::filesystem::path WaitingTasksStatePath() const;
+    std::filesystem::path DailySummaryStatePath() const;
     std::string TodayDate() const;
     std::string NowIso() const;
 
@@ -97,11 +104,13 @@ private:
     kabot::relay::RelayManager& relay_;
     kabot::cron::CronService* cron_ = nullptr;
     std::atomic<bool> running_{false};
-    std::thread poll_thread_;
+    std::vector<std::thread> poll_threads_;
+    std::unique_ptr<kabot::ThreadPool> task_pool_;
     std::vector<std::string> cron_job_ids_;
     std::unordered_map<std::string, DailySummaryRecord> daily_summary_records_;
     std::unordered_map<std::string, WaitingTask> waiting_tasks_;
     std::unordered_map<std::string, ActiveTask> active_tasks_;
+    std::unordered_set<std::string> claimed_task_ids_;
     mutable std::mutex mutex_;
 };
 

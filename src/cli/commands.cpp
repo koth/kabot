@@ -282,6 +282,7 @@ int RunGateway() {
         &heartbeat.Cron());
     kabot::channels::ChannelManager channels(config, bus);
     kabot::relay::RelayManager relay(config, agents);
+    agents.SetRelayManager(&relay);
     kabot::task::TaskRuntime task_runtime(config, agents, relay, &heartbeat.Cron());
 
     agents.SetInboundInterceptor([&task_runtime](kabot::bus::InboundMessage& msg,
@@ -294,7 +295,8 @@ int RunGateway() {
     });
 
     on_heartbeat = [&agents, &default_agent_name](const std::string& prompt) {
-        return agents.ProcessDirect(default_agent_name, prompt, "heartbeat:" + default_agent_name);
+        kabot::CancelToken cancel_token{};
+        return agents.ProcessDirect(default_agent_name, prompt, "heartbeat:" + default_agent_name, {}, {}, {}, cancel_token);
     };
     on_cron = [&agents, &bus, &config, &default_agent_name, &task_runtime](const kabot::cron::CronJob& job) {
         std::string task_runtime_response;
@@ -319,10 +321,15 @@ int RunGateway() {
             bus.PublishOutbound(outbound);
             return job.payload.message;
         } else {
+            kabot::CancelToken cancel_token{};
             const auto response = agents.ProcessDirect(
                 resolved_agent_name,
                 job.payload.message,
-                "cron:" + resolved_agent_name + ":" + job.id);
+                "cron:" + resolved_agent_name + ":" + job.id,
+                {},
+                {},
+                {},
+                cancel_token);
             kabot::bus::OutboundMessage outbound{};
             outbound.channel = resolved_channel_name;
             outbound.channel_instance = outbound.channel;

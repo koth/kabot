@@ -142,6 +142,7 @@ struct RelayManagedAgentConfig {
     int heartbeat_interval_s = 0;
     int reconnect_initial_delay_ms = 0;
     int reconnect_max_delay_ms = 0;
+    bool auto_claim_tasks = false;
 };
 
 struct RelayConfig {
@@ -161,6 +162,11 @@ struct TaskSystemConfig {
     bool enabled = false;
     int poll_interval_s = 30;
     int daily_summary_hour_local = 22;
+    int max_concurrent_tasks = 4;
+    int task_timeout_s = 300;
+    int shutdown_timeout_s = 30;
+    int max_tasks_per_plan = 20;
+    std::string plan_work_default_mode = "plan_and_submit";
 };
 
 struct QmdConfig {

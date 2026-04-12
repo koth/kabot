@@ -91,6 +91,52 @@ std::string BuildTaskStatusTarget(const kabot::config::RelayManagedAgentConfig& 
     return "/api/agents/" + UrlEncode(config.agent_id) + "/tasks/" + UrlEncode(task_id) + "/status";
 }
 
+std::string BuildProjectTaskSubmissionTarget(const std::string& project_id) {
+    return "/api/projects/" + UrlEncode(project_id) + "/tasks";
+}
+
+http::request<http::string_body> BuildSubmitTaskRequest(
+    const kabot::config::RelayManagedAgentConfig& config,
+    const std::string& project_id,
+    const kabot::relay::RelayTaskCreate& task) {
+    Json body = {
+        {"title", task.title},
+        {"instruction", task.instruction}
+    };
+    if (!task.priority.empty()) {
+        body["priority"] = task.priority;
+    }
+    if (!task.project.project_id.empty()) {
+        body["projectId"] = task.project.project_id;
+    }
+    if (!task.merge_request.empty()) {
+        body["mergeRequest"] = task.merge_request;
+    }
+    if (!task.interaction.channel.empty()) {
+        body["interaction"] = {
+            {"channel", task.interaction.channel},
+            {"channelInstance", task.interaction.channel_instance},
+            {"chatId", task.interaction.chat_id},
+            {"replyTo", task.interaction.reply_to}
+        };
+    }
+    if (!task.depends_on.empty()) {
+        body["dependsOn"] = task.depends_on;
+    }
+    if (!task.metadata.empty()) {
+        body["metadata"] = task.metadata;
+    }
+
+    http::request<http::string_body> request{http::verb::post, BuildProjectTaskSubmissionTarget(project_id), 11};
+    request.set(http::field::host, config.host);
+    request.set(http::field::user_agent, "kabot-relay/1.0");
+    request.set(http::field::authorization, "Bearer " + config.token);
+    request.set(http::field::content_type, "application/json");
+    request.body() = body.dump();
+    request.prepare_payload();
+    return request;
+}
+
 std::string BuildSessionKey(const kabot::config::RelayManagedAgentConfig& config,
                             const std::string& command_id) {
     return "relay:" + config.name + ":" + command_id;
@@ -369,6 +415,130 @@ std::shared_ptr<IWebSocketSession> CreateSession(const kabot::config::RelayManag
     return std::make_shared<PlainWebSocketSession>(config);
 }
 
+class IRelayHttpSession {
+public:
+    virtual ~IRelayHttpSession() = default;
+    virtual http::response<http::string_body> DoRequest(http::request<http::string_body> request) = 0;
+    virtual void Close() = 0;
+};
+
+class PlainRelayHttpSession final : public IRelayHttpSession {
+public:
+    explicit PlainRelayHttpSession(const kabot::config::RelayManagedAgentConfig& config)
+        : config_(config)
+        , resolver_(ioc_) {}
+
+    http::response<http::string_body> DoRequest(http::request<http::string_body> request) override {
+        request.set(http::field::connection, "keep-alive");
+        if (!connected_) {
+            Connect();
+        }
+        try {
+            beast::flat_buffer buffer;
+            http::response<http::string_body> response;
+            http::write(stream_, request);
+            http::read(stream_, buffer, response);
+            return response;
+        } catch (const std::exception&) {
+            connected_ = false;
+            Close();
+            Connect();
+            beast::flat_buffer buffer;
+            http::response<http::string_body> response;
+            http::write(stream_, request);
+            http::read(stream_, buffer, response);
+            return response;
+        }
+    }
+
+    void Close() override {
+        beast::error_code ec;
+        stream_.socket().close(ec);
+        connected_ = false;
+    }
+
+private:
+    void Connect() {
+        auto endpoints = resolver_.resolve(config_.host, std::to_string(config_.port));
+        stream_.connect(endpoints);
+        connected_ = true;
+    }
+
+    kabot::config::RelayManagedAgentConfig config_;
+    net::io_context ioc_;
+    tcp::resolver resolver_;
+    beast::tcp_stream stream_{ioc_};
+    bool connected_ = false;
+};
+
+class TlsRelayHttpSession final : public IRelayHttpSession {
+public:
+    explicit TlsRelayHttpSession(const kabot::config::RelayManagedAgentConfig& config)
+        : config_(config)
+        , resolver_(ioc_)
+        , ssl_ctx_(ssl::context::tls_client)
+        , stream_(ioc_, ssl_ctx_) {
+        ssl_ctx_.set_default_verify_paths();
+        ssl_ctx_.set_verify_mode(config_.skip_tls_verify ? ssl::verify_none : ssl::verify_peer);
+    }
+
+    http::response<http::string_body> DoRequest(http::request<http::string_body> request) override {
+        request.set(http::field::connection, "keep-alive");
+        if (!connected_) {
+            Connect();
+        }
+        try {
+            beast::flat_buffer buffer;
+            http::response<http::string_body> response;
+            http::write(stream_, request);
+            http::read(stream_, buffer, response);
+            return response;
+        } catch (const std::exception&) {
+            connected_ = false;
+            Close();
+            Connect();
+            beast::flat_buffer buffer;
+            http::response<http::string_body> response;
+            http::write(stream_, request);
+            http::read(stream_, buffer, response);
+            return response;
+        }
+    }
+
+    void Close() override {
+        beast::error_code ec;
+        stream_.shutdown(ec);
+        connected_ = false;
+    }
+
+private:
+    void Connect() {
+        if (!IsIpLiteral(config_.host)) {
+            if (!SSL_set_tlsext_host_name(stream_.native_handle(), config_.host.c_str())) {
+                throw std::runtime_error("failed to set TLS SNI host");
+            }
+        }
+        auto endpoints = resolver_.resolve(config_.host, std::to_string(config_.port));
+        beast::get_lowest_layer(stream_).connect(endpoints);
+        stream_.handshake(ssl::stream_base::client);
+        connected_ = true;
+    }
+
+    kabot::config::RelayManagedAgentConfig config_;
+    net::io_context ioc_;
+    tcp::resolver resolver_;
+    ssl::context ssl_ctx_;
+    beast::ssl_stream<beast::tcp_stream> stream_;
+    bool connected_ = false;
+};
+
+std::unique_ptr<IRelayHttpSession> CreateHttpSession(const kabot::config::RelayManagedAgentConfig& config) {
+    if (config.use_tls || config.scheme == "wss") {
+        return std::make_unique<TlsRelayHttpSession>(config);
+    }
+    return std::make_unique<PlainRelayHttpSession>(config);
+}
+
 Json BuildActivityPayload(const std::string& status,
                           const std::string& summary,
                           const std::string& command_id = {}) {
@@ -424,9 +594,7 @@ Json BuildResultPayload(const std::string& command_id,
     return payload;
 }
 
-template <typename Stream>
-http::response<http::string_body> SendDailySummaryRequest(
-    Stream& stream,
+http::request<http::string_body> BuildDailySummaryRequest(
     const kabot::config::RelayManagedAgentConfig& config,
     const std::string& summary_date,
     const std::string& content,
@@ -446,17 +614,10 @@ http::response<http::string_body> SendDailySummaryRequest(
     request.set(http::field::content_type, "application/json");
     request.body() = body.dump();
     request.prepare_payload();
-
-    http::write(stream, request);
-    beast::flat_buffer buffer;
-    http::response<http::string_body> response;
-    http::read(stream, buffer, response);
-    return response;
+    return request;
 }
 
-template <typename Stream>
-http::response<http::string_body> SendClaimNextTaskRequest(
-    Stream& stream,
+http::request<http::string_body> BuildClaimNextTaskRequest(
     const kabot::config::RelayManagedAgentConfig& config,
     bool supports_interaction) {
     Json body = {
@@ -473,17 +634,10 @@ http::response<http::string_body> SendClaimNextTaskRequest(
     request.set(http::field::content_type, "application/json");
     request.body() = body.dump();
     request.prepare_payload();
-
-    http::write(stream, request);
-    beast::flat_buffer buffer;
-    http::response<http::string_body> response;
-    http::read(stream, buffer, response);
-    return response;
+    return request;
 }
 
-template <typename Stream>
-http::response<http::string_body> SendTaskStatusRequest(
-    Stream& stream,
+http::request<http::string_body> BuildTaskStatusRequest(
     const kabot::config::RelayManagedAgentConfig& config,
     const std::string& task_id,
     const RelayTaskStatusUpdate& update) {
@@ -522,12 +676,7 @@ http::response<http::string_body> SendTaskStatusRequest(
     request.set(http::field::content_type, "application/json");
     request.body() = body.dump();
     request.prepare_payload();
-
-    http::write(stream, request);
-    beast::flat_buffer buffer;
-    http::response<http::string_body> response;
-    http::read(stream, buffer, response);
-    return response;
+    return request;
 }
 
 }  // namespace
@@ -543,17 +692,23 @@ public:
         Stop();
     }
 
+    const kabot::config::RelayManagedAgentConfig& Config() const {
+        return config_;
+    }
+
     void Start() {
         if (running_ || !config_.enabled) {
             return;
         }
         running_ = true;
+        StartOutboundWriter();
         worker_ = std::thread([this] { Run(); });
     }
 
     void Stop() {
         running_ = false;
         StopHeartbeat();
+        StopOutboundWriter();
         reconnect_cv_.notify_all();
         CloseSession();
         if (worker_.joinable()) {
@@ -561,9 +716,13 @@ public:
         }
     }
 
+    http::response<http::string_body> DoHttpRequest(http::request<http::string_body> request) const {
+        return HttpSession()->DoRequest(std::move(request));
+    }
+
     void ReportInboundPhase(kabot::agent::DirectExecutionPhase phase) {
         try {
-            SendJson(BuildActivityPayload("busy", kabot::agent::DirectExecutionPhaseSummary(phase)));
+            EnqueueJson(BuildActivityPayload("busy", kabot::agent::DirectExecutionPhaseSummary(phase)));
         } catch (const std::exception& ex) {
             LOG_WARN("[relay] worker={} inbound phase report failed: {}", config_.name, ex.what());
         } catch (...) {
@@ -574,9 +733,9 @@ public:
     void ReportInboundCompletion(bool success, const std::string& summary) {
         try {
             if (success) {
-                SendJson(BuildActivityPayload("idle", "Idle"));
+                EnqueueJson(BuildActivityPayload("idle", "Idle"));
             } else {
-                SendJson(BuildActivityPayload("error",
+                EnqueueJson(BuildActivityPayload("error",
                                               summary.empty() ? "channel execution failed" : summary));
             }
         } catch (const std::exception& ex) {
@@ -607,9 +766,10 @@ public:
         }
 
         try {
-            const auto response = config_.use_tls || config_.scheme == "wss"
-                ? UploadDailySummaryTls(trimmed_date, trimmed_content, trimmed_reported_at)
-                : UploadDailySummaryPlain(trimmed_date, trimmed_content, trimmed_reported_at);
+            const auto request = BuildDailySummaryRequest(
+                config_, trimmed_date, trimmed_content,
+                trimmed_reported_at.empty() ? IsoNow() : trimmed_reported_at);
+            const auto response = HttpSession()->DoRequest(request);
             const auto success = response.result_int() >= 200 && response.result_int() < 300;
             std::string message;
             if (!success) {
@@ -631,9 +791,8 @@ public:
         }
 
         try {
-            const auto response = config_.use_tls || config_.scheme == "wss"
-                ? ClaimNextTaskTls(supports_interaction)
-                : ClaimNextTaskPlain(supports_interaction);
+            const auto request = BuildClaimNextTaskRequest(config_, supports_interaction);
+            const auto response = HttpSession()->DoRequest(request);
             const auto http_status = static_cast<int>(response.result_int());
             if (http_status < 200 || http_status >= 300) {
                 return {false, false, http_status,
@@ -674,9 +833,8 @@ public:
         }
 
         try {
-            const auto response = config_.use_tls || config_.scheme == "wss"
-                ? UpdateTaskStatusTls(trimmed_task_id, update)
-                : UpdateTaskStatusPlain(trimmed_task_id, update);
+            const auto request = BuildTaskStatusRequest(config_, trimmed_task_id, update);
+            const auto response = HttpSession()->DoRequest(request);
             const auto success = response.result_int() >= 200 && response.result_int() < 300;
             std::string message;
             if (!success) {
@@ -693,117 +851,11 @@ public:
     }
 
 private:
-    http::response<http::string_body> ClaimNextTaskPlain(bool supports_interaction) const {
-        net::io_context ioc;
-        tcp::resolver resolver(ioc);
-        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
-        beast::tcp_stream stream(ioc);
-        stream.connect(endpoints);
-        auto response = SendClaimNextTaskRequest(stream, config_, supports_interaction);
-        beast::error_code ec;
-        stream.socket().shutdown(tcp::socket::shutdown_both, ec);
-        return response;
-    }
-
-    http::response<http::string_body> ClaimNextTaskTls(bool supports_interaction) const {
-        net::io_context ioc;
-        tcp::resolver resolver(ioc);
-        ssl::context ssl_ctx(ssl::context::tls_client);
-        ssl_ctx.set_default_verify_paths();
-        ssl_ctx.set_verify_mode(config_.skip_tls_verify ? ssl::verify_none : ssl::verify_peer);
-        beast::ssl_stream<beast::tcp_stream> stream(ioc, ssl_ctx);
-        if (!IsIpLiteral(config_.host)) {
-            if (!SSL_set_tlsext_host_name(stream.native_handle(), config_.host.c_str())) {
-                throw std::runtime_error("failed to set TLS SNI host");
-            }
+    IRelayHttpSession* HttpSession() const {
+        if (!http_session_) {
+            http_session_ = CreateHttpSession(config_);
         }
-        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
-        beast::get_lowest_layer(stream).connect(endpoints);
-        stream.handshake(ssl::stream_base::client);
-        auto response = SendClaimNextTaskRequest(stream, config_, supports_interaction);
-        beast::error_code ec;
-        stream.shutdown(ec);
-        return response;
-    }
-
-    http::response<http::string_body> UpdateTaskStatusPlain(const std::string& task_id,
-                                                            const RelayTaskStatusUpdate& update) const {
-        net::io_context ioc;
-        tcp::resolver resolver(ioc);
-        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
-        beast::tcp_stream stream(ioc);
-        stream.connect(endpoints);
-        auto response = SendTaskStatusRequest(stream, config_, task_id, update);
-        beast::error_code ec;
-        stream.socket().shutdown(tcp::socket::shutdown_both, ec);
-        return response;
-    }
-
-    http::response<http::string_body> UpdateTaskStatusTls(const std::string& task_id,
-                                                          const RelayTaskStatusUpdate& update) const {
-        net::io_context ioc;
-        tcp::resolver resolver(ioc);
-        ssl::context ssl_ctx(ssl::context::tls_client);
-        ssl_ctx.set_default_verify_paths();
-        ssl_ctx.set_verify_mode(config_.skip_tls_verify ? ssl::verify_none : ssl::verify_peer);
-        beast::ssl_stream<beast::tcp_stream> stream(ioc, ssl_ctx);
-        if (!IsIpLiteral(config_.host)) {
-            if (!SSL_set_tlsext_host_name(stream.native_handle(), config_.host.c_str())) {
-                throw std::runtime_error("failed to set TLS SNI host");
-            }
-        }
-        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
-        beast::get_lowest_layer(stream).connect(endpoints);
-        stream.handshake(ssl::stream_base::client);
-        auto response = SendTaskStatusRequest(stream, config_, task_id, update);
-        beast::error_code ec;
-        stream.shutdown(ec);
-        return response;
-    }
-
-    http::response<http::string_body> UploadDailySummaryPlain(const std::string& summary_date,
-                                                              const std::string& content,
-                                                              const std::string& reported_at) const {
-        net::io_context ioc;
-        tcp::resolver resolver(ioc);
-        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
-        beast::tcp_stream stream(ioc);
-        stream.connect(endpoints);
-        auto response = SendDailySummaryRequest(stream,
-                                                config_,
-                                                summary_date,
-                                                content,
-                                                reported_at.empty() ? IsoNow() : reported_at);
-        beast::error_code ec;
-        stream.socket().shutdown(tcp::socket::shutdown_both, ec);
-        return response;
-    }
-
-    http::response<http::string_body> UploadDailySummaryTls(const std::string& summary_date,
-                                                            const std::string& content,
-                                                            const std::string& reported_at) const {
-        net::io_context ioc;
-        tcp::resolver resolver(ioc);
-        ssl::context ssl_ctx(ssl::context::tls_client);
-        ssl_ctx.set_default_verify_paths();
-        ssl_ctx.set_verify_mode(config_.skip_tls_verify ? ssl::verify_none : ssl::verify_peer);
-        beast::ssl_stream<beast::tcp_stream> stream(ioc, ssl_ctx);
-        if (!IsIpLiteral(config_.host)) {
-            if (!SSL_set_tlsext_host_name(stream.native_handle(), config_.host.c_str())) {
-                throw std::runtime_error("failed to set TLS SNI host");
-            }
-        }
-        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
-        beast::get_lowest_layer(stream).connect(endpoints);
-        stream.handshake(ssl::stream_base::client);
-        auto response = SendDailySummaryRequest(stream,
-                                                config_,
-                                                summary_date,
-                                                content,
-                                                reported_at.empty() ? IsoNow() : reported_at);
-        beast::error_code ec;
-        stream.shutdown(ec);
-        return response;
+        return http_session_.get();
     }
 
     void Run() {
@@ -893,10 +945,14 @@ private:
             const auto observer = [this, &command_id](kabot::agent::DirectExecutionPhase phase) {
                 SendJson(BuildActivityPayload("busy", PhaseActivitySummary(phase), command_id));
             };
+            kabot::CancelToken cancel_token{};
             const auto result = agents_.ProcessDirect(config_.local_agent,
                                                       payload,
                                                       BuildSessionKey(config_, command_id),
-                                                      observer);
+                                                      observer,
+                                                      {},
+                                                      {},
+                                                      cancel_token);
             SendJson(BuildResultPayload(command_id, "completed", "result", result, 100));
             SendJson(BuildActivityPayload("idle", "Idle"));
         } catch (const std::exception& ex) {
@@ -947,6 +1003,61 @@ private:
         if (heartbeat_thread_.joinable()) {
             heartbeat_thread_.join();
         }
+    }
+
+    void StartOutboundWriter() {
+        StopOutboundWriter();
+        {
+            std::lock_guard<std::mutex> guard(outbound_writer_mutex_);
+            outbound_writer_running_ = true;
+        }
+        outbound_writer_thread_ = std::thread([this] {
+            std::unique_lock<std::mutex> lock(outbound_writer_mutex_);
+            while (outbound_writer_running_) {
+                outbound_writer_cv_.wait(lock, [this] {
+                    return !outbound_writer_running_ || !outbound_queue_.empty();
+                });
+                if (!outbound_writer_running_) {
+                    break;
+                }
+                std::queue<Json> local;
+                local.swap(outbound_queue_);
+                lock.unlock();
+                while (!local.empty()) {
+                    try {
+                        SendJson(local.front());
+                    } catch (const std::exception& ex) {
+                        LOG_WARN("[relay] worker={} outbound write failed: {}", config_.name, ex.what());
+                    } catch (...) {
+                        LOG_WARN("[relay] worker={} outbound write failed", config_.name);
+                    }
+                    local.pop();
+                }
+                lock.lock();
+            }
+        });
+    }
+
+    void StopOutboundWriter() {
+        {
+            std::lock_guard<std::mutex> guard(outbound_writer_mutex_);
+            outbound_writer_running_ = false;
+        }
+        outbound_writer_cv_.notify_all();
+        if (outbound_writer_thread_.joinable()) {
+            outbound_writer_thread_.join();
+        }
+    }
+
+    void EnqueueJson(const Json& payload) {
+        {
+            std::lock_guard<std::mutex> guard(outbound_writer_mutex_);
+            if (!outbound_writer_running_) {
+                return;
+            }
+            outbound_queue_.push(payload);
+        }
+        outbound_writer_cv_.notify_one();
     }
 
     void SendJson(const Json& payload) {
@@ -1000,6 +1111,12 @@ private:
     std::mutex session_mutex_;
     std::mutex write_mutex_;
     std::shared_ptr<IWebSocketSession> session_;
+    mutable std::unique_ptr<IRelayHttpSession> http_session_;
+    std::queue<Json> outbound_queue_;
+    std::mutex outbound_writer_mutex_;
+    std::condition_variable outbound_writer_cv_;
+    std::thread outbound_writer_thread_;
+    bool outbound_writer_running_ = false;
 };
 
 RelayManager::RelayManager(const kabot::config::Config& config,
@@ -1069,6 +1186,18 @@ bool RelayManager::HasManagedLocalAgent(const std::string& local_agent) const {
     return workers_by_local_agent_.find(local_agent) != workers_by_local_agent_.end();
 }
 
+std::vector<std::string> RelayManager::AutoClaimLocalAgents() const {
+    std::vector<std::string> local_agents;
+    local_agents.reserve(config_.relay.managed_agents.size());
+    for (const auto& relay_agent : config_.relay.managed_agents) {
+        if (!relay_agent.enabled || relay_agent.local_agent.empty() || !relay_agent.auto_claim_tasks) {
+            continue;
+        }
+        local_agents.push_back(relay_agent.local_agent);
+    }
+    return local_agents;
+}
+
 RelayTaskClaimResult RelayManager::ClaimNextTask(const std::string& local_agent,
                                                  bool supports_interaction) {
     const auto it = workers_by_local_agent_.find(local_agent);
@@ -1097,6 +1226,43 @@ DailySummaryUploadResult RelayManager::UploadDailySummary(const std::string& loc
         return {false, 0, "no relay managed agent bound to local agent: " + local_agent};
     }
     return it->second->UploadDailySummary(summary_date, content, reported_at);
+}
+
+RelayTaskSubmissionResult RelayManager::SubmitProjectTask(const std::string& project_id,
+                                                          const RelayTaskCreate& task) {
+    if (workers_.empty()) {
+        return {false, 0, "no relay workers available", {}};
+    }
+    if (project_id.empty()) {
+        return {false, 0, "project_id is required for task submission", {}};
+    }
+    try {
+        const auto& worker = workers_.front();
+        const auto request = BuildSubmitTaskRequest(worker->Config(), project_id, task);
+        const auto response = worker->DoHttpRequest(request);
+        const bool success = response.result_int() >= 200 && response.result_int() < 300;
+        std::string message;
+        std::string returned_task_id;
+        if (!success) {
+            message = !response.body().empty()
+                ? response.body()
+                : std::string(response.reason());
+        } else {
+            try {
+                auto json = Json::parse(response.body(), nullptr, false);
+                if (json.is_object() && json.contains("taskId") && json["taskId"].is_string()) {
+                    returned_task_id = json["taskId"].get<std::string>();
+                }
+            } catch (...) {
+                // ignore parse failure; we still succeeded at HTTP level
+            }
+        }
+        return {success, static_cast<int>(response.result_int()), message, returned_task_id};
+    } catch (const std::exception& ex) {
+        return {false, 0, ex.what(), {}};
+    } catch (...) {
+        return {false, 0, "unknown task submission error", {}};
+    }
 }
 
 }  // namespace kabot::relay

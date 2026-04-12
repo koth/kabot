@@ -11,6 +11,11 @@
 #include "bus/message_bus.hpp"
 #include "config/config_schema.hpp"
 #include "providers/llm_provider.hpp"
+#include "utils/cancel_token.hpp"
+
+namespace kabot::relay {
+class RelayManager;
+}
 
 namespace kabot::agent {
 
@@ -35,6 +40,7 @@ public:
     void SetInboundExecutionReporter(InboundExecutionReporter reporter);
     void SetInboundInterceptor(InboundInterceptor interceptor);
     void SetInboundPostProcessor(InboundPostProcessor processor);
+    void SetRelayManager(kabot::relay::RelayManager* relay_manager);
 
     kabot::bus::OutboundMessage HandleInbound(kabot::bus::InboundMessage msg);
     std::string ProcessDirect(const std::string& agent_name,
@@ -42,7 +48,8 @@ public:
                               const std::string& session_key,
                               const DirectExecutionObserver& observer = {},
                               const DirectExecutionTarget& target = {},
-                              const DirectOutboundObserver& outbound_observer = {});
+                              const DirectOutboundObserver& outbound_observer = {},
+                              const kabot::CancelToken& cancel_token = {});
     const kabot::config::AgentInstanceConfig* GetAgentConfig(const std::string& name) const;
     std::string ResolveAgentName(const kabot::bus::InboundMessage& msg) const;
     std::string DefaultAgentName() const;
@@ -55,6 +62,7 @@ private:
     kabot::providers::LLMProvider& provider_;
     kabot::config::Config config_;
     kabot::cron::CronService* cron_ = nullptr;
+    kabot::relay::RelayManager* relay_manager_ = nullptr;
     std::unordered_map<std::string, std::unique_ptr<AgentLoop>> agents_;
     InboundExecutionReporter inbound_reporter_;
     InboundInterceptor inbound_interceptor_;

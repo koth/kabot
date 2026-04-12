@@ -200,6 +200,9 @@ void ApplyRelayManagedAgentConfig(RelayManagedAgentConfig& target, const nlohman
     if (source.contains("reconnectMaxDelayMs") && source["reconnectMaxDelayMs"].is_number_integer()) {
         target.reconnect_max_delay_ms = source["reconnectMaxDelayMs"].get<int>();
     }
+    if (source.contains("autoClaimTasks") && source["autoClaimTasks"].is_boolean()) {
+        target.auto_claim_tasks = source["autoClaimTasks"].get<bool>();
+    }
 }
 
 void ApplyBindingConfig(ChannelBindingConfig& target, const nlohmann::json& source) {
@@ -702,6 +705,21 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         if (task_system.contains("dailySummaryHourLocal") && task_system["dailySummaryHourLocal"].is_number_integer()) {
             config.task_system.daily_summary_hour_local = task_system["dailySummaryHourLocal"].get<int>();
         }
+        if (task_system.contains("maxConcurrentTasks") && task_system["maxConcurrentTasks"].is_number_integer()) {
+            config.task_system.max_concurrent_tasks = task_system["maxConcurrentTasks"].get<int>();
+        }
+        if (task_system.contains("taskTimeoutS") && task_system["taskTimeoutS"].is_number_integer()) {
+            config.task_system.task_timeout_s = task_system["taskTimeoutS"].get<int>();
+        }
+        if (task_system.contains("shutdownTimeoutS") && task_system["shutdownTimeoutS"].is_number_integer()) {
+            config.task_system.shutdown_timeout_s = task_system["shutdownTimeoutS"].get<int>();
+        }
+        if (task_system.contains("maxTasksPerPlan") && task_system["maxTasksPerPlan"].is_number_integer()) {
+            config.task_system.max_tasks_per_plan = task_system["maxTasksPerPlan"].get<int>();
+        }
+        if (task_system.contains("planWorkDefaultMode") && task_system["planWorkDefaultMode"].is_string()) {
+            config.task_system.plan_work_default_mode = task_system["planWorkDefaultMode"].get<std::string>();
+        }
     }
 
     if (data.contains("qmd") && data["qmd"].is_object()) {
@@ -1168,6 +1186,49 @@ Config LoadConfig(const std::filesystem::path& config_path) {
         config.task_system.daily_summary_hour_local = ParseInt(
             task_system_daily_summary_hour,
             config.task_system.daily_summary_hour_local);
+    }
+
+    const auto task_system_max_concurrent = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__MAX_CONCURRENT_TASKS",
+        "KABOT_TASK_SYSTEM_MAX_CONCURRENT_TASKS");
+    if (!task_system_max_concurrent.empty()) {
+        config.task_system.max_concurrent_tasks = ParseInt(
+            task_system_max_concurrent,
+            config.task_system.max_concurrent_tasks);
+    }
+
+    const auto task_system_timeout = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__TASK_TIMEOUT_S",
+        "KABOT_TASK_SYSTEM_TASK_TIMEOUT_S");
+    if (!task_system_timeout.empty()) {
+        config.task_system.task_timeout_s = ParseInt(
+            task_system_timeout,
+            config.task_system.task_timeout_s);
+    }
+
+    const auto task_system_shutdown_timeout = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__SHUTDOWN_TIMEOUT_S",
+        "KABOT_TASK_SYSTEM_SHUTDOWN_TIMEOUT_S");
+    if (!task_system_shutdown_timeout.empty()) {
+        config.task_system.shutdown_timeout_s = ParseInt(
+            task_system_shutdown_timeout,
+            config.task_system.shutdown_timeout_s);
+    }
+
+    const auto task_system_max_tasks_per_plan = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__MAX_TASKS_PER_PLAN",
+        "KABOT_TASK_SYSTEM_MAX_TASKS_PER_PLAN");
+    if (!task_system_max_tasks_per_plan.empty()) {
+        config.task_system.max_tasks_per_plan = ParseInt(
+            task_system_max_tasks_per_plan,
+            config.task_system.max_tasks_per_plan);
+    }
+
+    const auto task_system_plan_work_default_mode = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__PLAN_WORK_DEFAULT_MODE",
+        "KABOT_TASK_SYSTEM_PLAN_WORK_DEFAULT_MODE");
+    if (!task_system_plan_work_default_mode.empty()) {
+        config.task_system.plan_work_default_mode = task_system_plan_work_default_mode;
     }
 
     NormalizeConfig(config, json_agent_defaults);

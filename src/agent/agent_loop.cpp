@@ -11,8 +11,10 @@
 #include "agent/tools/cron.hpp"
 #include "agent/tools/filesystem.hpp"
 #include "agent/tools/message.hpp"
+#include "agent/tools/plan_work.hpp"
 #include "agent/tools/shell.hpp"
 #include "agent/tools/spawn.hpp"
+#include "agent/tools/todo.hpp"
 #include "agent/tools/tts.hpp"
 #include "agent/tools/web.hpp"
 #include "sandbox/sandbox_executor.hpp"
@@ -247,17 +249,30 @@ AgentLoop::AgentLoop(
     std::string workspace,
     kabot::config::AgentDefaults config,
     kabot::config::QmdConfig qmd,
+    kabot::config::TaskSystemConfig task_system,
     kabot::cron::CronService* cron)
     : bus_(bus)
     , provider_(provider)
     , workspace_(std::move(workspace))
     , config_(std::move(config))
     , qmd_(std::move(qmd))
+    , task_system_(std::move(task_system))
     , context_(workspace_, qmd_)
     , sessions_(workspace_)
     , memory_(workspace_)
     , cron_(cron) {
+    subagent_service_ = std::make_unique<kabot::subagent::SubagentService>(
+        provider_, tools_, workspace_, static_cast<kabot::config::AgentDefaults>(config_));
     RegisterDefaultTools();
+}
+
+void AgentLoop::SetRelayManager(kabot::relay::RelayManager* relay_manager) {
+    relay_manager_ = relay_manager;
+    if (auto* tool = tools_.Get("plan_work")) {
+        if (auto* plan_tool = dynamic_cast<kabot::agent::tools::PlanWorkTool*>(tool)) {
+            plan_tool->SetContext({}, {}, {}, {});
+        }
+    }
 }
 
 void AgentLoop::Run() {
@@ -321,13 +336,20 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
                                      const std::string& session_key,
                                      const DirectExecutionObserver& observer,
                                      const DirectExecutionTarget& target,
-                                     const DirectOutboundObserver& outbound_observer) {
+                                     const DirectOutboundObserver& outbound_observer,
+                                     const kabot::CancelToken& cancel_token) {
     std::lock_guard<std::mutex> guard(process_mutex_);
-    if (auto* tool = tools_.Get("message")) {
-        if (auto* message_tool = dynamic_cast<kabot::agent::tools::MessageTool*>(tool)) {
+    if (auto* tool = tools_.Get("send_message")) {
+        if (auto* message_tool = dynamic_cast<kabot::agent::tools::SendMessageTool*>(tool)) {
             const auto target_channel = target.channel_instance.empty() ? target.channel : target.channel_instance;
             message_tool->SetContext(target_channel, target.chat_id);
             message_tool->SetObserver(outbound_observer);
+        }
+    }
+    if (auto* tool = tools_.Get("plan_work")) {
+        if (auto* plan_tool = dynamic_cast<kabot::agent::tools::PlanWorkTool*>(tool)) {
+            const auto target_channel = target.channel_instance.empty() ? target.channel : target.channel_instance;
+            plan_tool->SetContext(target.channel, target.channel_instance, target.chat_id, {});
         }
     }
     auto session = sessions_.GetOrCreate(session_key);
@@ -362,9 +384,17 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
     notify_phase(DirectExecutionPhase::kProcessing);
 
     while (iteration < config_.max_iterations) {
+        if (cancel_token.IsCancelled()) {
+            throw std::runtime_error("Task cancelled by timeout or stop request");
+        }
         iteration += 1;
+
+        auto projected = context_.ProjectMessages(messages);
+        const auto estimated_tokens = context_.EstimateTokens(projected);
+        LOG_DEBUG("[agent] estimated_tokens={} session={}", estimated_tokens, session_key);
+
         auto response = provider_.Chat(
-            messages,
+            projected,
             tools_.GetDefinitions(),
             model,
             config_.max_tokens,
@@ -373,13 +403,16 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
         if (response.HasToolCalls()) {
             tool_called = true;
             notify_phase(DirectExecutionPhase::kCallingTools);
-            messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls);
-            session.AddMessage("assistant", response.content, response.tool_calls);
+            messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls, response.usage);
+            session.AddMessage("assistant", response.content, response.tool_calls, response.usage);
             for (const auto& call : response.tool_calls) {
-                if (call.name == "message") {
+                if (cancel_token.IsCancelled()) {
+                    throw std::runtime_error("Task cancelled by timeout or stop request");
+                }
+                if (call.name == "send_message") {
                     message_sent = true;
                 }
-                std::string result = tools_.Execute(call.name, call.arguments);
+                std::string result = ExecuteToolWithGuardrails(session, call);
                 messages = context_.AddToolResult(messages, call.id, call.name, result);
                 session.AddToolMessage(call.id, call.name, result);
             }
@@ -419,7 +452,7 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
 }
 
 kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundMessage& msg,
-                                                      const DirectExecutionObserver& observer) {
+                                                       const DirectExecutionObserver& observer) {
     std::lock_guard<std::mutex> guard(process_mutex_);
     const auto send_typing = [&]() {
         if (msg.channel != "telegram") {
@@ -434,8 +467,8 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
         bus_.PublishOutbound(typing);
     };
     send_typing();
-    if (auto* tool = tools_.Get("message")) {
-        if (auto* message_tool = dynamic_cast<kabot::agent::tools::MessageTool*>(tool)) {
+    if (auto* tool = tools_.Get("send_message")) {
+        if (auto* message_tool = dynamic_cast<kabot::agent::tools::SendMessageTool*>(tool)) {
             message_tool->SetContext(msg.channel, msg.chat_id);
             message_tool->SetObserver({});
         }
@@ -443,6 +476,11 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
     if (auto* tool = tools_.Get("cron")) {
         if (auto* cron_tool = dynamic_cast<kabot::agent::tools::CronTool*>(tool)) {
             cron_tool->SetContext(msg.agent_name, msg.channel_instance.empty() ? msg.channel : msg.channel_instance, msg.chat_id);
+        }
+    }
+    if (auto* tool = tools_.Get("plan_work")) {
+        if (auto* plan_tool = dynamic_cast<kabot::agent::tools::PlanWorkTool*>(tool)) {
+            plan_tool->SetContext(msg.channel, msg.channel_instance, msg.chat_id, msg.agent_name);
         }
     }
     std::string content = msg.content;
@@ -506,8 +544,13 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
 
     while (iteration < config_.max_iterations) {
         iteration += 1;
+
+        auto projected = context_.ProjectMessages(messages);
+        const auto estimated_tokens = context_.EstimateTokens(projected);
+        LOG_DEBUG("[agent] estimated_tokens={} session={}", estimated_tokens, msg.SessionKey());
+
         auto response = provider_.Chat(
-            messages,
+            projected,
             tools_.GetDefinitions(),
             model,
             config_.max_tokens,
@@ -516,13 +559,13 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
         if (response.HasToolCalls()) {
             tool_called = true;
             notify_phase(DirectExecutionPhase::kCallingTools);
-            messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls);
-            session.AddMessage("assistant", response.content, response.tool_calls);
+            messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls, response.usage);
+            session.AddMessage("assistant", response.content, response.tool_calls, response.usage);
             for (const auto& call : response.tool_calls) {
-                if (call.name == "message") {
+                if (call.name == "send_message") {
                     message_sent = true;
                 }
-                std::string result = tools_.Execute(call.name, call.arguments);
+                std::string result = ExecuteToolWithGuardrails(session, call);
                 messages = context_.AddToolResult(messages, call.id, call.name, result);
                 session.AddToolMessage(call.id, call.name, result);
             }
@@ -572,7 +615,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
 }
 
 void AgentLoop::RegisterDefaultTools() {
-    tools_.Register(std::make_unique<kabot::agent::tools::MessageTool>(
+    tools_.Register(std::make_unique<kabot::agent::tools::SendMessageTool>(
         [this](const kabot::bus::OutboundMessage& msg) {
             bus_.PublishOutbound(msg);
         }));
@@ -581,11 +624,13 @@ void AgentLoop::RegisterDefaultTools() {
         return;
     }
 
-    tools_.Register(std::make_unique<kabot::agent::tools::ReadFileTool>());
-    tools_.Register(std::make_unique<kabot::agent::tools::WriteFileTool>());
-    tools_.Register(std::make_unique<kabot::agent::tools::EditFileTool>());
+    tools_.Register(std::make_unique<kabot::agent::tools::FileReadTool>());
+    tools_.Register(std::make_unique<kabot::agent::tools::FileWriteTool>());
+    tools_.Register(std::make_unique<kabot::agent::tools::FileEditTool>());
     tools_.Register(std::make_unique<kabot::agent::tools::ListDirTool>());
-    tools_.Register(std::make_unique<kabot::agent::tools::ExecTool>(workspace_));
+    tools_.Register(std::make_unique<kabot::agent::tools::GlobTool>());
+    tools_.Register(std::make_unique<kabot::agent::tools::GrepTool>());
+    tools_.Register(std::make_unique<kabot::agent::tools::BashTool>(workspace_));
     if (!config_.brave_api_key.empty()) {
         const auto size = config_.brave_api_key.size();
         const auto prefix = size > 4 ? config_.brave_api_key.substr(0, 4) : config_.brave_api_key;
@@ -596,11 +641,17 @@ void AgentLoop::RegisterDefaultTools() {
     tools_.Register(std::make_unique<kabot::agent::tools::WebSearchTool>(config_.brave_api_key));
     tools_.Register(std::make_unique<kabot::agent::tools::WebFetchTool>(workspace_));
     tools_.Register(std::make_unique<kabot::agent::tools::RedditFetchTool>());
-    tools_.Register(std::make_unique<kabot::agent::tools::SpawnTool>());
+    tools_.Register(std::make_unique<kabot::agent::tools::AgentTool>(
+        [this](const kabot::subagent::AgentSpawnInput& input) {
+            return this->SpawnSubagent(input);
+        }));
+    tools_.Register(std::make_unique<kabot::agent::tools::TodoWriteTool>());
     tools_.Register(std::make_unique<kabot::agent::tools::EdgeTtsTool>(workspace_));
     if (cron_) {
         tools_.Register(std::make_unique<kabot::agent::tools::CronTool>(cron_));
     }
+    tools_.Register(std::make_unique<kabot::agent::tools::PlanWorkTool>(
+        provider_, task_system_, relay_manager_));
 }
 
 void AgentLoop::AppendMemoryEntry(const std::string& session_key,
@@ -652,8 +703,8 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
         origin_chat_id = msg.chat_id.substr(delimiter + 1);
     }
 
-    if (auto* tool = tools_.Get("message")) {
-        if (auto* message_tool = dynamic_cast<kabot::agent::tools::MessageTool*>(tool)) {
+    if (auto* tool = tools_.Get("send_message")) {
+        if (auto* message_tool = dynamic_cast<kabot::agent::tools::SendMessageTool*>(tool)) {
             message_tool->SetContext(origin_channel, origin_chat_id);
             message_tool->SetObserver({});
         }
@@ -682,8 +733,13 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
 
     while (iteration < config_.max_iterations) {
         iteration += 1;
+
+        auto projected = context_.ProjectMessages(messages);
+        const auto estimated_tokens = context_.EstimateTokens(projected);
+        LOG_DEBUG("[agent] estimated_tokens={} session={}", estimated_tokens, session_key);
+
         auto response = provider_.Chat(
-            messages,
+            projected,
             tools_.GetDefinitions(),
             model,
             config_.max_tokens,
@@ -691,13 +747,13 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
 
         if (response.HasToolCalls()) {
             tool_called = true;
-            messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls);
-            session.AddMessage("assistant", response.content, response.tool_calls);
+            messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls, response.usage);
+            session.AddMessage("assistant", response.content, response.tool_calls, response.usage);
             for (const auto& call : response.tool_calls) {
-                if (call.name == "message") {
+                if (call.name == "send_message") {
                     message_sent = true;
                 }
-                std::string result = tools_.Execute(call.name, call.arguments);
+                std::string result = ExecuteToolWithGuardrails(session, call);
                 messages = context_.AddToolResult(messages, call.id, call.name, result);
                 session.AddToolMessage(call.id, call.name, result);
             }
@@ -739,6 +795,50 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
         outbound.content = final_content;
     }
     return outbound;
+}
+
+std::string AgentLoop::ExecuteToolWithGuardrails(kabot::session::Session& session,
+                                                    const kabot::providers::ToolCallRequest& call) {
+    if (call.name == "file_edit") {
+        auto path_it = call.arguments.find("path");
+        if (path_it == call.arguments.end() || path_it->second.empty()) {
+            return "Error: file_edit requires a path parameter";
+        }
+        if (!session.HasReadFile(path_it->second)) {
+            LOG_WARN("[agent] file_edit blocked: {} was not read before editing session={}",
+                     path_it->second, session.Key());
+            return "Error: file must be read using read_file before editing with file_edit. Path: " + path_it->second;
+        }
+    }
+
+    auto result = tools_.Execute(call.name, call.arguments);
+
+    if (call.name == "read_file") {
+        auto path_it = call.arguments.find("path");
+        if (path_it != call.arguments.end() && !result.empty()) {
+            if (result.rfind("Error:", 0) != 0) {
+                session.RecordFileRead(path_it->second);
+            }
+        }
+    }
+
+    return result;
+}
+
+std::string AgentLoop::SpawnSubagent(const kabot::subagent::AgentSpawnInput& input) {
+    if (!subagent_service_) {
+        throw std::runtime_error("subagent service not initialized");
+    }
+
+    kabot::subagent::SubagentContext parent_ctx;
+    parent_ctx.agent_id = "main";
+    parent_ctx.parent_session_id = "";
+
+    auto result = subagent_service_->Spawn(input, parent_ctx);
+    if (result.type == "async_launched") {
+        return "Spawned subagent " + result.agent_id + " as background task " + result.task_id;
+    }
+    return result.result;
 }
 
 }  // namespace kabot::agent

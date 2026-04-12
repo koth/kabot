@@ -97,8 +97,22 @@ void Session::AddMessage(const std::string& role, const std::string& content) {
 void Session::AddMessage(const std::string& role,
                          const std::string& content,
                          const std::vector<kabot::providers::ToolCallRequest>& tool_calls) {
+    AddMessage(role, content, tool_calls, {});
+}
+
+void Session::AddMessage(const std::string& role,
+                         const std::string& content,
+                         const std::vector<kabot::providers::ToolCallRequest>& tool_calls,
+                         const std::unordered_map<std::string, int>& usage) {
     SessionMessage msg{role, content, NowIso()};
     msg.tool_calls = tool_calls;
+    if (!usage.empty()) {
+        nlohmann::json j = nlohmann::json::object();
+        for (const auto& [k, v] : usage) {
+            j[k] = v;
+        }
+        msg.usage_json = j.dump();
+    }
     messages_.push_back(std::move(msg));
     updated_at_ = NowIso();
 }
@@ -111,6 +125,14 @@ void Session::AddToolMessage(const std::string& tool_call_id,
     msg.name = tool_name;
     messages_.push_back(std::move(msg));
     updated_at_ = NowIso();
+}
+
+void Session::RecordFileRead(const std::string& path) {
+    read_file_paths_.insert(path);
+}
+
+bool Session::HasReadFile(const std::string& path) const {
+    return read_file_paths_.find(path) != read_file_paths_.end();
 }
 
 std::vector<kabot::providers::Message> Session::GetHistory(std::size_t max_messages) const {
@@ -150,6 +172,16 @@ std::vector<kabot::providers::Message> Session::GetHistory(std::size_t max_messa
         msg.name = entry.name;
         msg.tool_call_id = entry.tool_call_id;
         msg.tool_calls = entry.tool_calls;
+        if (!entry.usage_json.empty()) {
+            auto parsed = nlohmann::json::parse(entry.usage_json, nullptr, false);
+            if (parsed.is_object()) {
+                for (const auto& item : parsed.items()) {
+                    if (item.value().is_number_integer()) {
+                        msg.usage[item.key()] = item.value().get<int>();
+                    }
+                }
+            }
+        }
         history.push_back(msg);
     }
 
@@ -233,8 +265,8 @@ void SessionManager::Save(const Session& session) {
     sqlite3_finalize(stmt);
 
     const std::string insert_sql =
-        "INSERT INTO messages(session_key, role, content, timestamp, name, tool_call_id, tool_calls) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?);";
+        "INSERT INTO messages(session_key, role, content, timestamp, name, tool_call_id, tool_calls, usage_json) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?);";
     if (sqlite3_prepare_v2(db_, insert_sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
         for (const auto& msg : session.Messages()) {
             const auto tool_calls_text = SerializeToolCalls(msg.tool_calls);
@@ -248,6 +280,11 @@ void SessionManager::Save(const Session& session) {
                 sqlite3_bind_null(stmt, 7);
             } else {
                 sqlite3_bind_text(stmt, 7, tool_calls_text.c_str(), -1, SQLITE_TRANSIENT);
+            }
+            if (msg.usage_json.empty()) {
+                sqlite3_bind_null(stmt, 8);
+            } else {
+                sqlite3_bind_text(stmt, 8, msg.usage_json.c_str(), -1, SQLITE_TRANSIENT);
             }
             sqlite3_step(stmt);
             sqlite3_reset(stmt);
@@ -330,7 +367,7 @@ std::optional<Session> SessionManager::Load(const std::string& key) const {
 
     std::vector<SessionMessage> messages;
     const std::string message_sql =
-        "SELECT role, content, timestamp, name, tool_call_id, tool_calls "
+        "SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage_json "
         "FROM messages WHERE session_key = ? ORDER BY id ASC;";
     if (sqlite3_prepare_v2(db_, message_sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
@@ -342,6 +379,7 @@ std::optional<Session> SessionManager::Load(const std::string& key) const {
             msg.name = SafeText(sqlite3_column_text(stmt, 3));
             msg.tool_call_id = SafeText(sqlite3_column_text(stmt, 4));
             msg.tool_calls = ParseToolCalls(SafeText(sqlite3_column_text(stmt, 5)));
+            msg.usage_json = SafeText(sqlite3_column_text(stmt, 6));
             messages.push_back(std::move(msg));
         }
     }
@@ -382,7 +420,8 @@ void SessionManager::EnsureSchema() {
              "timestamp TEXT,"
              "name TEXT,"
              "tool_call_id TEXT,"
-             "tool_calls TEXT"
+             "tool_calls TEXT,"
+             "usage_json TEXT"
              ");");
     Exec(db_, "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_key);");
 }
