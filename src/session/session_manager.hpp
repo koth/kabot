@@ -5,7 +5,6 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "providers/llm_provider.hpp"
@@ -21,7 +20,6 @@ struct SessionMessage {
     std::string name;
     std::string tool_call_id;
     std::vector<kabot::providers::ToolCallRequest> tool_calls;
-    std::string usage_json;
 };
 
 class Session {
@@ -38,17 +36,10 @@ public:
     void AddMessage(const std::string& role,
                     const std::string& content,
                     const std::vector<kabot::providers::ToolCallRequest>& tool_calls);
-    void AddMessage(const std::string& role,
-                    const std::string& content,
-                    const std::vector<kabot::providers::ToolCallRequest>& tool_calls,
-                    const std::unordered_map<std::string, int>& usage);
     void AddToolMessage(const std::string& tool_call_id,
                         const std::string& tool_name,
                         const std::string& content);
     std::vector<kabot::providers::Message> GetHistory(std::size_t max_messages = 50) const;
-
-    void RecordFileRead(const std::string& path);
-    bool HasReadFile(const std::string& path) const;
 
     const std::string& Key() const { return key_; }
     const std::vector<SessionMessage>& Messages() const { return messages_; }
@@ -66,7 +57,6 @@ private:
     std::string created_at_;
     std::string updated_at_;
     nlohmann::json metadata_ = nlohmann::json::object();
-    std::unordered_set<std::string> read_file_paths_;
 };
 
 struct SessionInfo {

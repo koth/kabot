@@ -79,24 +79,6 @@ struct DailySummaryUploadResult {
     std::string message;
 };
 
-struct RelayTaskCreate {
-    std::string title;
-    std::string instruction;
-    std::string priority;
-    RelayTaskProject project;
-    RelayTaskInteraction interaction;
-    std::vector<std::string> depends_on;
-    std::unordered_map<std::string, std::string> metadata;
-    std::string merge_request;
-};
-
-struct RelayTaskSubmissionResult {
-    bool success = false;
-    int http_status = 0;
-    std::string message;
-    std::string task_id;
-};
-
 class RelayManager {
 public:
     RelayManager(const kabot::config::Config& config,
@@ -107,7 +89,6 @@ public:
     void Stop();
     std::vector<std::string> ManagedLocalAgents() const;
     bool HasManagedLocalAgent(const std::string& local_agent) const;
-    std::vector<std::string> AutoClaimLocalAgents() const;
     RelayTaskClaimResult ClaimNextTask(const std::string& local_agent,
                                        bool supports_interaction = true);
     RelayTaskStatusUpdateResult UpdateTaskStatus(const std::string& local_agent,
@@ -117,8 +98,6 @@ public:
                                                 const std::string& summary_date,
                                                 const std::string& content,
                                                 const std::string& reported_at = {});
-    RelayTaskSubmissionResult SubmitProjectTask(const std::string& project_id,
-                                                const RelayTaskCreate& task);
 
 private:
     class Worker;

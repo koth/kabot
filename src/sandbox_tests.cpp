@@ -103,7 +103,7 @@ void TestTimeout() {
 }
 
 void TestShellToolBlocked() {
-    kabot::agent::tools::BashTool tool(std::filesystem::current_path().string());
+    kabot::agent::tools::ExecTool tool(std::filesystem::current_path().string());
     std::unordered_map<std::string, std::string> params;
     params["command"] = "rm -rf /tmp/test";
     const auto result = tool.Execute(params);

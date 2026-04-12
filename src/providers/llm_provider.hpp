@@ -34,8 +34,6 @@ struct Message {
     std::string tool_call_id;
     std::vector<ToolCallRequest> tool_calls;
     std::vector<ContentPart> content_parts;
-    std::unordered_map<std::string, int> usage;
-    bool is_virtual = false;
 };
 
 struct LLMResponse {

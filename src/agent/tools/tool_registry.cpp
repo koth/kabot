@@ -1,6 +1,5 @@
 #include "agent/tools/tool_registry.hpp"
 
-#include "agent/tools/tool_schema_validator.hpp"
 #include "utils/logging.hpp"
 
 namespace kabot::agent::tools {
@@ -41,13 +40,6 @@ std::string ToolRegistry::Execute(
     if (!tool) {
         return "Error: Tool '" + name + "' not found";
     }
-
-    auto validation_error = ValidateToolInput(tool, params);
-    if (!validation_error.empty()) {
-        LOG_WARN("[tool] schema_validation_failed name={} error={}", name, validation_error);
-        return validation_error;
-    }
-
     std::string param_dump;
     if (!params.empty()) {
         bool first = true;

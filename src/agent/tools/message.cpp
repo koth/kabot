@@ -14,23 +14,23 @@ std::string GetParam(const std::unordered_map<std::string, std::string>& params,
 
 }  // namespace
 
-SendMessageTool::SendMessageTool(SendCallback callback)
+MessageTool::MessageTool(SendCallback callback)
     : callback_(std::move(callback)) {}
 
-void SendMessageTool::SetContext(const std::string& channel, const std::string& chat_id) {
+void MessageTool::SetContext(const std::string& channel, const std::string& chat_id) {
     default_channel_ = channel;
     default_chat_id_ = chat_id;
 }
 
-void SendMessageTool::SetObserver(SendCallback observer) {
+void MessageTool::SetObserver(SendCallback observer) {
     observer_ = std::move(observer);
 }
 
-std::string SendMessageTool::ParametersJson() const {
-    return R"({"type":"object","properties":{"content":{"type":"string","description":"Message text content"},"media":{"type":"string","description":"Comma-separated local file paths to attach"},"channel":{"type":"string","description":"Target channel identifier"},"chat_id":{"type":"string","description":"Target chat identifier"}},"required":[]})";
+std::string MessageTool::ParametersJson() const {
+    return R"({"type":"object","properties":{"content":{"type":"string"},"media":{"type":"string","description":"comma-separated local file paths"},"channel":{"type":"string"},"chat_id":{"type":"string"}},"required":[]})";
 }
 
-std::string SendMessageTool::Execute(const std::unordered_map<std::string, std::string>& params) {
+std::string MessageTool::Execute(const std::unordered_map<std::string, std::string>& params) {
     const auto content = GetParam(params, "content");
     const auto media_raw = GetParam(params, "media");
 

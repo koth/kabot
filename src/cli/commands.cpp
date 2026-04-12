@@ -41,10 +41,6 @@
 #include "nlohmann/json.hpp"
 #include "utils/logging.hpp"
 
-#ifdef KABOT_ENABLE_WEIXIN
-#include "weixin/auth/login_qr.hpp"
-#endif
-
 namespace {
 
 std::atomic<bool> g_running{true};
@@ -282,7 +278,6 @@ int RunGateway() {
         &heartbeat.Cron());
     kabot::channels::ChannelManager channels(config, bus);
     kabot::relay::RelayManager relay(config, agents);
-    agents.SetRelayManager(&relay);
     kabot::task::TaskRuntime task_runtime(config, agents, relay, &heartbeat.Cron());
 
     agents.SetInboundInterceptor([&task_runtime](kabot::bus::InboundMessage& msg,
@@ -295,8 +290,7 @@ int RunGateway() {
     });
 
     on_heartbeat = [&agents, &default_agent_name](const std::string& prompt) {
-        kabot::CancelToken cancel_token{};
-        return agents.ProcessDirect(default_agent_name, prompt, "heartbeat:" + default_agent_name, {}, {}, {}, cancel_token);
+        return agents.ProcessDirect(default_agent_name, prompt, "heartbeat:" + default_agent_name);
     };
     on_cron = [&agents, &bus, &config, &default_agent_name, &task_runtime](const kabot::cron::CronJob& job) {
         std::string task_runtime_response;
@@ -321,15 +315,10 @@ int RunGateway() {
             bus.PublishOutbound(outbound);
             return job.payload.message;
         } else {
-            kabot::CancelToken cancel_token{};
             const auto response = agents.ProcessDirect(
                 resolved_agent_name,
                 job.payload.message,
-                "cron:" + resolved_agent_name + ":" + job.id,
-                {},
-                {},
-                {},
-                cancel_token);
+                "cron:" + resolved_agent_name + ":" + job.id);
             kabot::bus::OutboundMessage outbound{};
             outbound.channel = resolved_channel_name;
             outbound.channel_instance = outbound.channel;
@@ -551,19 +540,8 @@ int main(int argc, char** argv) {
         return HupGateway();
     }
 
-#ifdef KABOT_ENABLE_WEIXIN
-    if (argc >= 2 && std::string(argv[1]) == "weixin-login") {
-        std::string account_id = (argc >= 3) ? argv[2] : "default";
-        std::string base_url = "https://ilinkai.weixin.qq.com";
-        
-        std::cout << "Starting WeChat QR code login for account: " << account_id << std::endl;
-        bool success = weixin::auth::PerformQRLogin(account_id, base_url);
-        return success ? 0 : 1;
-    }
-#endif
-
     if (argc < 2) {
-        LOG_INFO("Usage: kabot_cli gateway | kabot_cli restart | kabot_cli hup | kabot_cli weixin-login [account_id] | kabot_cli \"message\"");
+        LOG_INFO("Usage: kabot_cli gateway | kabot_cli restart | kabot_cli hup | kabot_cli \"message\"");
         return 1;
     }
 

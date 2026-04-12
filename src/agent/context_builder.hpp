@@ -1,7 +1,6 @@
 #pragma once
 
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "agent/memory_store.hpp"
@@ -30,12 +29,7 @@ public:
     std::vector<kabot::providers::Message> AddAssistantMessage(
         std::vector<kabot::providers::Message> messages,
         const std::string& content,
-        const std::vector<kabot::providers::ToolCallRequest>& tool_calls,
-        const std::unordered_map<std::string, int>& usage = {}) const;
-    std::vector<kabot::providers::Message> ProjectMessages(
-        std::vector<kabot::providers::Message> messages) const;
-    std::size_t EstimateTokens(
-        const std::vector<kabot::providers::Message>& messages) const;
+        const std::vector<kabot::providers::ToolCallRequest>& tool_calls) const;
 
 private:
     std::string workspace_;

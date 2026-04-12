@@ -1,13 +1,10 @@
 #include "agent/context_builder.hpp"
 
-#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 #include <utility>
 
@@ -47,18 +44,45 @@ std::string ContextBuilder::BuildSystemPrompt(
     oss << "When generating commands for shell-like tools, prefer POSIX shell syntax.\n";
     oss << "Do not assume PowerShell syntax.\n\n";
 #endif
+    const auto now = std::chrono::system_clock::now();
+    const auto now_time = std::chrono::system_clock::to_time_t(now);
+    std::tm now_tm{};
+#if defined(_WIN32)
+    localtime_s(&now_tm, &now_time);
+#else
+    localtime_r(&now_time, &now_tm);
+#endif
+    oss << "Current time: " << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S %Z") << "\n\n";
 
     const auto bootstrap = LoadBootstrapFiles();
     if (!bootstrap.empty()) {
         oss << bootstrap << "\n\n";
     }
 
-    
+    std::string memory;
+    if (qmd_.enabled) {
+        LOG_DEBUG("[context] memory=QMD");
+        if (!current_message.empty()) {
+            LOG_DEBUG("[context] qmd_query={}", current_message);
+            memory = BuildQmdContext(current_message);
+            if (!memory.empty() && false) {
+                LOG_DEBUG("[context] qmd_memory\n{}", memory);
+            }
+        }
+    } else {
+        LOG_DEBUG("[context] memory=FULL");
+        memory = memory_.GetMemoryContext();
+    }
+    if (!memory.empty()) {
+        oss << "# Memory\n\n" << memory << "\n\n";
+    }
 
     oss << "## Tool Use\n";
     oss << "When the user asks you to inspect files, read code, modify code, write files, run commands, browse the web, fetch external data, send messages, or schedule work, do not claim the task is completed unless you have already called the relevant tool and received its result.\n";
     oss << "If tools are required but unavailable or insufficient, explicitly say what is missing instead of pretending success.\n";
     oss << "If you are giving reasoning or advice without executing anything, make that distinction explicit.\n\n";
+
+
 
     oss << "## Memory Writing\n";
     oss << "Only record durable information: preferences, long-term facts, goal changes, key conclusions, task summaries.\n";
@@ -84,35 +108,6 @@ std::string ContextBuilder::BuildSystemPrompt(
         oss << "# Skills\n\n";
         oss << "The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.\n\n";
         oss << summary << "\n";
-    }
-
-    const auto now = std::chrono::system_clock::now();
-    const auto now_time = std::chrono::system_clock::to_time_t(now);
-    std::tm now_tm{};
-#if defined(_WIN32)
-    localtime_s(&now_tm, &now_time);
-#else
-    localtime_r(&now_time, &now_tm);
-#endif
-    oss << "Current time: " << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S %Z") << "\n\n";
-
-
-    std::string memory;
-    if (qmd_.enabled) {
-        LOG_DEBUG("[context] memory=QMD");
-        if (!current_message.empty()) {
-            LOG_DEBUG("[context] qmd_query={}", current_message);
-            memory = BuildQmdContext(current_message);
-            if (!memory.empty() && false) {
-                LOG_DEBUG("[context] qmd_memory\n{}", memory);
-            }
-        }
-    } else {
-        LOG_DEBUG("[context] memory=FULL");
-        memory = memory_.GetMemoryContext();
-    }
-    if (!memory.empty()) {
-        oss << "# Memory\n\n" << memory << "\n\n";
     }
 
     return oss.str();
@@ -157,173 +152,13 @@ std::vector<kabot::providers::Message> ContextBuilder::AddToolResult(
 std::vector<kabot::providers::Message> ContextBuilder::AddAssistantMessage(
     std::vector<kabot::providers::Message> messages,
     const std::string& content,
-    const std::vector<kabot::providers::ToolCallRequest>& tool_calls,
-    const std::unordered_map<std::string, int>& usage) const {
+    const std::vector<kabot::providers::ToolCallRequest>& tool_calls) const {
     kabot::providers::Message assistant_message{};
     assistant_message.role = "assistant";
     assistant_message.content = content;
     assistant_message.tool_calls = tool_calls;
-    assistant_message.usage = usage;
     messages.push_back(assistant_message);
     return messages;
-}
-
-namespace {
-
-std::size_t RoughEstimateMessageTokens(const kabot::providers::Message& msg) {
-    std::size_t chars = 0;
-    if (!msg.content.empty()) {
-        chars += msg.content.size();
-    }
-    for (const auto& part : msg.content_parts) {
-        if (!part.text.empty()) {
-            chars += part.text.size();
-        }
-        if (!part.image_url.empty()) {
-            chars += 256; // rough estimate for image reference
-        }
-    }
-    for (const auto& call : msg.tool_calls) {
-        chars += call.name.size();
-        for (const auto& [k, v] : call.arguments) {
-            chars += k.size() + v.size();
-        }
-    }
-    return chars / 4 + 1;
-}
-
-} // namespace
-
-namespace {
-
-constexpr std::size_t kToolResultMaxChars = 12000;
-
-std::string TruncateContent(const std::string& value, std::size_t max_len) {
-    if (value.size() <= max_len) {
-        return value;
-    }
-    return value.substr(0, max_len) +
-           "\n...[truncated, original size=" +
-           std::to_string(value.size()) +
-           " chars]...";
-}
-
-} // namespace
-
-std::vector<kabot::providers::Message> ContextBuilder::ProjectMessages(
-    std::vector<kabot::providers::Message> messages) const {
-    // 1. Remove virtual messages
-    messages.erase(
-        std::remove_if(messages.begin(), messages.end(),
-            [](const auto& m) { return m.is_virtual; }),
-        messages.end());
-
-    // 2. Collect all tool_use ids from assistant messages and all tool_result ids
-    std::unordered_set<std::string> pending_tool_use_ids;
-    std::unordered_set<std::string> seen_tool_result_ids;
-    for (const auto& msg : messages) {
-        if (msg.role == "assistant") {
-            for (const auto& call : msg.tool_calls) {
-                pending_tool_use_ids.insert(call.id);
-            }
-        }
-        if (msg.role == "tool" && !msg.tool_call_id.empty()) {
-            seen_tool_result_ids.insert(msg.tool_call_id);
-        }
-    }
-
-    // 3. Append placeholder tool_results for any missing tool_use
-    for (const auto& id : pending_tool_use_ids) {
-        if (seen_tool_result_ids.find(id) == seen_tool_result_ids.end()) {
-            kabot::providers::Message placeholder{};
-            placeholder.role = "tool";
-            placeholder.tool_call_id = id;
-            placeholder.name = "unknown";
-            placeholder.content = "[Tool result missing due to internal error]";
-            messages.push_back(std::move(placeholder));
-        }
-    }
-
-    // 4. Determine protected tail: keep the most recent assistant + everything after it intact
-    std::size_t protected_start = messages.size();
-    for (std::size_t i = messages.size(); i-- > 0;) {
-        if (messages[i].role == "assistant") {
-            protected_start = i;
-            break;
-        }
-    }
-
-    // 5. Strip oversized tool results and multimedia placeholders (only outside protected tail)
-    for (std::size_t idx = 0; idx < messages.size(); ++idx) {
-        auto& msg = messages[idx];
-        if (msg.role == "tool" && msg.content.size() > kToolResultMaxChars && idx < protected_start) {
-            msg.content = TruncateContent(msg.content, kToolResultMaxChars);
-        }
-        if (idx < protected_start && !msg.content_parts.empty()) {
-            bool has_media = false;
-            for (const auto& part : msg.content_parts) {
-                if (part.type == "image_url") {
-                    has_media = true;
-                    break;
-                }
-            }
-            if (has_media) {
-                std::vector<kabot::providers::ContentPart> stripped;
-                for (auto& part : msg.content_parts) {
-                    if (part.type == "image_url") {
-                        kabot::providers::ContentPart placeholder{};
-                        placeholder.type = "text";
-                        placeholder.text = "[image]";
-                        stripped.push_back(std::move(placeholder));
-                    } else {
-                        stripped.push_back(std::move(part));
-                    }
-                }
-                msg.content_parts = std::move(stripped);
-            }
-        }
-    }
-
-    // 5. Coalesce stray system-reminder text blocks into adjacent tool messages
-    std::vector<kabot::providers::Message> merged;
-    merged.reserve(messages.size());
-    for (auto& msg : messages) {
-        if (!merged.empty() && msg.role == "user" &&
-            !msg.content.empty() && msg.content.find("<system-reminder>") == 0 &&
-            merged.back().role == "tool") {
-            merged.back().content = msg.content + "\n" + merged.back().content;
-            continue;
-        }
-        merged.push_back(std::move(msg));
-    }
-
-    return merged;
-}
-
-std::size_t ContextBuilder::EstimateTokens(
-    const std::vector<kabot::providers::Message>& messages) const {
-    // Look backwards for the last assistant message with a recorded usage baseline.
-    for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
-        if (it->role == "assistant") {
-            auto usage_it = it->usage.find("total_tokens");
-            if (usage_it != it->usage.end() && usage_it->second > 0) {
-                std::size_t baseline = static_cast<std::size_t>(usage_it->second);
-                std::size_t anchor_index = static_cast<std::size_t>(
-                    std::distance(it, messages.rend()) - 1);
-                std::size_t added_est = 0;
-                for (std::size_t i = anchor_index + 1; i < messages.size(); ++i) {
-                    added_est += RoughEstimateMessageTokens(messages[i]);
-                }
-                return baseline + added_est;
-            }
-        }
-    }
-    // No baseline found: rough estimate everything.
-    std::size_t total = 0;
-    for (const auto& msg : messages) {
-        total += RoughEstimateMessageTokens(msg);
-    }
-    return total;
 }
 
 std::string ContextBuilder::LoadBootstrapFiles() const {

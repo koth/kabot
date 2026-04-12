@@ -1,7 +1,6 @@
 #include "agent/agent_loop.hpp"
 #include "agent/agent_registry.hpp"
 #include "agent/tools/cron.hpp"
-#include "agent/tools/plan_work.hpp"
 #include "cron/cron_service.hpp"
 #include "relay/relay_manager.hpp"
 #include "task/task_runtime.hpp"
@@ -13,7 +12,6 @@
 #include <vector>
 
 #include "nlohmann/json.hpp"
-#include "utils/cancel_token.hpp"
 
 namespace {
 
@@ -60,29 +58,6 @@ public:
 
 private:
     std::vector<kabot::providers::LLMResponse> responses_;
-};
-
-class PlanWorkStubProvider : public kabot::providers::LLMProvider {
-public:
-    kabot::providers::LLMResponse Chat(
-        const std::vector<kabot::providers::Message>&,
-        const std::vector<kabot::providers::ToolDefinition>&,
-        const std::string&,
-        int,
-        double) override {
-        kabot::providers::LLMResponse response;
-        response.content = R"({
-            "tasks": [
-                {"title": "Setup project", "instruction": "Initialize repo", "priority": "high"},
-                {"title": "Write tests", "instruction": "Add unit tests", "priority": "normal", "depends_on": ["Setup project"]}
-            ]
-        })";
-        return response;
-    }
-
-    std::string GetDefaultModel() const override {
-        return "stub";
-    }
 };
 
 void Expect(bool condition, const std::string& message) {
@@ -258,8 +233,7 @@ void TestProcessDirectRoutesToNamedAgent() {
     const auto config = BuildConfig();
     kabot::agent::AgentRegistry registry(bus, provider, config, nullptr);
 
-    kabot::CancelToken cancel_token{};
-    const auto result = registry.ProcessDirect("ops-agent", "hello from relay", "relay:ops-agent:cmd-1", {}, {}, {}, cancel_token);
+    const auto result = registry.ProcessDirect("ops-agent", "hello from relay", "relay:ops-agent:cmd-1");
     Expect(result == "stub", "expected ProcessDirect to route relay command to named local agent");
 }
 
@@ -269,8 +243,7 @@ void TestProcessDirectRejectsUnknownAgent() {
     const auto config = BuildConfig();
     kabot::agent::AgentRegistry registry(bus, provider, config, nullptr);
 
-    kabot::CancelToken cancel_token{};
-    const auto result = registry.ProcessDirect("missing-agent", "hello from relay", "relay:missing-agent:cmd-1", {}, {}, {}, cancel_token);
+    const auto result = registry.ProcessDirect("missing-agent", "hello from relay", "relay:missing-agent:cmd-1");
     Expect(result == "No agent is configured to handle this request.",
            "expected ProcessDirect to reject unknown relay local agent");
 }
@@ -300,7 +273,7 @@ void TestCronToolCapturesAgentChannelAndToContext() {
     Expect(jobs.front().payload.to == "chat-9", "expected cron payload.to to capture current chat target");
 }
 
-void TestMessageOnlyToolProfileRegistersOnlySendMessageTool() {
+void TestMessageOnlyToolProfileRegistersOnlyMessageTool() {
     kabot::bus::MessageBus bus;
     StubProvider provider;
     kabot::config::AgentDefaults agent_config{};
@@ -314,13 +287,12 @@ void TestMessageOnlyToolProfileRegistersOnlySendMessageTool() {
         agent_config.workspace,
         agent_config,
         qmd,
-        {},
         nullptr);
 
     auto tools = agent_loop.RegisteredTools();
     std::sort(tools.begin(), tools.end());
     Expect(tools.size() == 1, "expected message_only tool profile to register exactly one tool");
-    Expect(tools.front() == "send_message", "expected message_only tool profile to keep only the send_message tool");
+    Expect(tools.front() == "message", "expected message_only tool profile to keep only the message tool");
 }
 
 void TestProcessDirectEmitsObservedOutboundMessage() {
@@ -330,7 +302,7 @@ void TestProcessDirectEmitsObservedOutboundMessage() {
     tool_call_response.content = "asking user";
     tool_call_response.tool_calls.push_back({
         "call-1",
-        "send_message",
+        "message",
         {
             {"content", "Please confirm deployment target."}
         }
@@ -349,12 +321,10 @@ void TestProcessDirectEmitsObservedOutboundMessage() {
         agent_config.workspace,
         agent_config,
         qmd,
-        {},
         nullptr);
 
     kabot::bus::OutboundMessage observed{};
     bool observed_called = false;
-    kabot::CancelToken cancel_token{};
     const auto result = agent_loop.ProcessDirect(
         "ask the user to confirm",
         "task:test:1",
@@ -363,8 +333,7 @@ void TestProcessDirectEmitsObservedOutboundMessage() {
         [&](const kabot::bus::OutboundMessage& msg) {
             observed_called = true;
             observed = msg;
-        },
-        cancel_token);
+        });
 
     Expect(observed_called, "expected ProcessDirect outbound observer to be called when message tool sends");
     Expect(observed.content == "Please confirm deployment target.",
@@ -519,76 +488,6 @@ void TestTaskRuntimeStateDumpContainsCoreFields() {
     Expect(state.contains("waitingTasks"), "expected runtime state dump to contain waitingTasks");
 }
 
-void TestPlanWorkToolPlanOnlyModeReturnsPreview() {
-    PlanWorkStubProvider provider;
-    kabot::config::TaskSystemConfig task_config;
-    task_config.max_tasks_per_plan = 5;
-    task_config.plan_work_default_mode = "plan_and_submit";
-
-    kabot::agent::tools::PlanWorkTool tool(provider, task_config, nullptr);
-    std::unordered_map<std::string, std::string> params;
-    params["instruction"] = "Build a todo app";
-    params["mode"] = "plan_only";
-
-    auto result = tool.Execute(params);
-    Expect(result.find("Setup project") != std::string::npos,
-           "expected preview to mention 'Setup project'");
-    Expect(result.find("Write tests") != std::string::npos,
-           "expected preview to mention 'Write tests'");
-    Expect(result.find("Error:") == std::string::npos,
-           "expected no error in plan_only mode with valid plan");
-}
-
-void TestPlanWorkToolPlanAndSubmitRequiresRelayManager() {
-    PlanWorkStubProvider provider;
-    kabot::config::TaskSystemConfig task_config;
-    task_config.max_tasks_per_plan = 5;
-
-    kabot::agent::tools::PlanWorkTool tool(provider, task_config, nullptr);
-    std::unordered_map<std::string, std::string> params;
-    params["instruction"] = "Build a todo app";
-    params["mode"] = "plan_and_submit";
-
-    auto result = tool.Execute(params);
-    Expect(result.find("relay manager not available") != std::string::npos,
-           "expected error when relay manager is missing in plan_and_submit mode");
-}
-
-void TestPlanWorkToolProjectContextIsInherited() {
-    PlanWorkStubProvider provider;
-    kabot::config::TaskSystemConfig task_config;
-    task_config.max_tasks_per_plan = 5;
-
-    kabot::agent::tools::PlanWorkTool tool(provider, task_config, nullptr);
-    tool.SetContext("telegram", "telegram_ops", "chat-99", "ops-agent");
-
-    std::unordered_map<std::string, std::string> params;
-    params["instruction"] = "Refactor auth";
-    params["mode"] = "plan_only";
-    params["project_context"] = R"({"project_id":"proj-42","merge_request":"mr-7"})";
-
-    auto result = tool.Execute(params);
-    Expect(result.find("Error:") == std::string::npos,
-           "expected no error when project_context is valid");
-    Expect(result.find("Task plan created") != std::string::npos,
-           "expected a plan summary");
-}
-
-void TestPlanWorkToolDefaultModeFallback() {
-    PlanWorkStubProvider provider;
-    kabot::config::TaskSystemConfig task_config;
-    task_config.max_tasks_per_plan = 5;
-    task_config.plan_work_default_mode = "plan_only";
-
-    kabot::agent::tools::PlanWorkTool tool(provider, task_config, nullptr);
-    std::unordered_map<std::string, std::string> params;
-    params["instruction"] = "Build a todo app";
-
-    auto result = tool.Execute(params);
-    Expect(result.find("Task plan created") != std::string::npos,
-           "expected plan_only fallback to produce a preview");
-}
-
 }  // namespace
 
 int main() {
@@ -600,17 +499,13 @@ int main() {
     TestProcessDirectRoutesToNamedAgent();
     TestProcessDirectRejectsUnknownAgent();
     TestCronToolCapturesAgentChannelAndToContext();
-    TestMessageOnlyToolProfileRegistersOnlySendMessageTool();
+    TestMessageOnlyToolProfileRegistersOnlyMessageTool();
     TestProcessDirectEmitsObservedOutboundMessage();
     TestTaskRuntimeRecordsAndResumesWaitingTask();
     TestTaskRuntimeDoesNotRecordCompletedReplyAsWaiting();
     TestTaskRuntimeClearsWaitingTaskOnNonWaitingReply();
     TestTaskRuntimeHandleInboundReturnsFalseWhenNoWaitingTask();
     TestTaskRuntimeStateDumpContainsCoreFields();
-    TestPlanWorkToolPlanOnlyModeReturnsPreview();
-    TestPlanWorkToolPlanAndSubmitRequiresRelayManager();
-    TestPlanWorkToolProjectContextIsInherited();
-    TestPlanWorkToolDefaultModeFallback();
     std::cout << "routing_tests passed" << std::endl;
     return 0;
 }

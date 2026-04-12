@@ -112,7 +112,7 @@ std::vector<CronJob> CronService::ListJobs(bool include_disabled) {
     return jobs;
 }
 
-std::optional<CronJob> CronService::AddJob(const CronJob& job) {
+CronJob CronService::AddJob(const CronJob& job) {
     LoadStore();
     CronJob added = job;
     const auto now = NowMs();
@@ -121,12 +121,7 @@ std::optional<CronJob> CronService::AddJob(const CronJob& job) {
     }
     added.created_at_ms = now;
     added.updated_at_ms = now;
-    const auto next_run = ComputeNextRun(added.schedule, now);
-    if (!next_run.has_value()) {
-        LOG_ERROR("[cron] Failed to add job: invalid schedule");
-        return std::nullopt;
-    }
-    added.state.next_run_at_ms = next_run;
+    added.state.next_run_at_ms = ComputeNextRun(added.schedule, now);
     store_.jobs.push_back(added);
     SaveStore();
     return added;

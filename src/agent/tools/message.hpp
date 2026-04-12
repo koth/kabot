@@ -8,16 +8,16 @@
 
 namespace kabot::agent::tools {
 
-class SendMessageTool : public Tool {
+class MessageTool : public Tool {
 public:
     using SendCallback = std::function<void(const kabot::bus::OutboundMessage&)>;
 
-    explicit SendMessageTool(SendCallback callback = nullptr);
+    explicit MessageTool(SendCallback callback = nullptr);
 
     void SetContext(const std::string& channel, const std::string& chat_id);
     void SetObserver(SendCallback observer);
 
-    std::string Name() const override { return "send_message"; }
+    std::string Name() const override { return "message"; }
     std::string Description() const override { return "Send a message to the user."; }
     std::string ParametersJson() const override;
     std::string Execute(const std::unordered_map<std::string, std::string>& params) override;

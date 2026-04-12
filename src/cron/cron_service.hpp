@@ -26,7 +26,7 @@ public:
     void Stop();
 
     std::vector<CronJob> ListJobs(bool include_disabled = false);
-    std::optional<CronJob> AddJob(const CronJob& job);
+    CronJob AddJob(const CronJob& job);
     bool RemoveJob(const std::string& job_id);
     std::optional<CronJob> EnableJob(const std::string& job_id, bool enabled = true);
     bool RunJob(const std::string& job_id, bool force = false);

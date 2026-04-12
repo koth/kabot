@@ -37,13 +37,6 @@ void AgentRegistry::SetInboundPostProcessor(InboundPostProcessor processor) {
     inbound_post_processor_ = std::move(processor);
 }
 
-void AgentRegistry::SetRelayManager(kabot::relay::RelayManager* relay_manager) {
-    relay_manager_ = relay_manager;
-    for (auto& [_, agent] : agents_) {
-        agent->SetRelayManager(relay_manager);
-    }
-}
-
 void AgentRegistry::InitAgents() {
     agents_.clear();
     for (const auto& agent_config : config_.agents.instances) {
@@ -69,13 +62,7 @@ void AgentRegistry::InitAgents() {
                 agent_config.workspace,
                 static_cast<const kabot::config::AgentDefaults&>(agent_config),
                 config_.qmd,
-                config_.task_system,
                 cron_));
-    }
-    if (relay_manager_) {
-        for (auto& [_, agent] : agents_) {
-            agent->SetRelayManager(relay_manager_);
-        }
     }
 }
 
@@ -178,14 +165,13 @@ std::string AgentRegistry::ProcessDirect(const std::string& agent_name,
                                          const std::string& session_key,
                                          const DirectExecutionObserver& observer,
                                          const DirectExecutionTarget& target,
-                                         const DirectOutboundObserver& outbound_observer,
-                                         const kabot::CancelToken& cancel_token) {
+                                         const DirectOutboundObserver& outbound_observer) {
     const auto resolved = agent_name.empty() ? DefaultAgentName() : agent_name;
     auto it = agents_.find(resolved);
     if (it == agents_.end()) {
         return "No agent is configured to handle this request.";
     }
-    return it->second->ProcessDirect(content, session_key, observer, target, outbound_observer, cancel_token);
+    return it->second->ProcessDirect(content, session_key, observer, target, outbound_observer);
 }
 
 const kabot::config::AgentInstanceConfig* AgentRegistry::GetAgentConfig(const std::string& name) const {
