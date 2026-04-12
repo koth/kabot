@@ -195,6 +195,24 @@ std::string StripMarkdownFences(std::string content) {
     return content;
 }
 
+std::string NormalizePriority(const std::string& raw) {
+    static const std::unordered_map<std::string, std::string> kMap = {
+        {"low", "low"},
+        {"normal", "normal"},
+        {"medium", "normal"},
+        {"high", "high"},
+        {"urgent", "high"},
+        {"critical", "high"},
+        {"important", "high"},
+    };
+    std::string lower;
+    lower.reserve(raw.size());
+    for (unsigned char ch : raw) lower.push_back(static_cast<char>(std::tolower(ch)));
+    auto it = kMap.find(lower);
+    if (it != kMap.end()) return it->second;
+    return "normal";
+}
+
 }  // namespace
 
 TaskPlan TaskDecomposer::Decompose(const std::string& instruction,
@@ -243,7 +261,7 @@ TaskPlan TaskDecomposer::Decompose(const std::string& instruction,
             PlannedTask task;
             task.title = item.value("title", std::string());
             task.instruction = item.value("instruction", std::string());
-            task.priority = item.value("priority", std::string("normal"));
+            task.priority = NormalizePriority(item.value("priority", std::string("normal")));
             task.estimated_effort = item.value("estimated_effort", std::string());
             if (item.contains("depends_on") && item["depends_on"].is_array()) {
                 for (const auto& dep : item["depends_on"]) {
