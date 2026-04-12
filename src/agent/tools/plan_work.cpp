@@ -115,7 +115,7 @@ std::string PlanWorkTool::Execute(const std::unordered_map<std::string, std::str
         LOG_INFO("[plan_work] no project_id provided, decomposing by instruction only");
     }
 
-    kabot::agent::planning::TaskDecomposer decomposer(provider_, task_config_.max_tasks_per_plan);
+    kabot::agent::planning::TaskDecomposer decomposer(provider_, task_config_.max_tasks_per_plan, task_config_.max_plan_output_tokens);
     auto plan = decomposer.Decompose(it_instruction->second, project_id, merge_request, project_description);
 
     if (!plan.success) {

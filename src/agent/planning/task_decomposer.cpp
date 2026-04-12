@@ -13,9 +13,11 @@
 namespace kabot::agent::planning {
 
 TaskDecomposer::TaskDecomposer(kabot::providers::LLMProvider& provider,
-                               int max_tasks_per_plan)
+                               int max_tasks_per_plan,
+                               int max_tokens)
     : provider_(provider)
-    , max_tasks_per_plan_(max_tasks_per_plan) {}
+    , max_tasks_per_plan_(max_tasks_per_plan)
+    , max_tokens_(max_tokens) {}
 
 std::string TaskDecomposer::BuildSystemPrompt(const std::string& project_description) {
     std::string prompt = "You are a project planning assistant. Given a user's instruction, decompose it into a structured list of tasks.\n";
@@ -208,12 +210,14 @@ TaskPlan TaskDecomposer::Decompose(const std::string& instruction,
         messages.push_back({"system", BuildSystemPrompt(project_description), {}, {}, {}, {}, {}, false});
         messages.push_back({"user", instruction, {}, {}, {}, {}, {}, false});
 
+        LOG_INFO("[task_decomposer] sending decomposition request to model={}", provider_.GetDefaultModel());
         auto response = provider_.Chat(
             messages,
             {},  // no tools needed for decomposition
             provider_.GetDefaultModel(),
-            4096,
+            max_tokens_,
             0.3);
+        LOG_INFO("[task_decomposer] received decomposition response content_len={}", response.content.size());
 
         if (response.content.empty()) {
             LOG_WARN("[task_decomposer] LLM returned empty content for decomposition");

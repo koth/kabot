@@ -468,6 +468,7 @@ public:
 
     void Close() override {
         beast::error_code ec;
+        stream_.socket().shutdown(tcp::socket::shutdown_both, ec);
         stream_.socket().close(ec);
         connected_ = false;
     }
@@ -522,7 +523,10 @@ public:
 
     void Close() override {
         beast::error_code ec;
-        stream_.shutdown(ec);
+        // Avoid graceful TLS shutdown to prevent "protocol is shutdown" errors
+        // when the peer already closed the underlying TCP connection.
+        beast::get_lowest_layer(stream_).socket().shutdown(tcp::socket::shutdown_both, ec);
+        beast::get_lowest_layer(stream_).socket().close(ec);
         connected_ = false;
     }
 

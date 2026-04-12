@@ -9,7 +9,8 @@ namespace kabot::agent::planning {
 class TaskDecomposer {
 public:
     explicit TaskDecomposer(kabot::providers::LLMProvider& provider,
-                            int max_tasks_per_plan = 20);
+                            int max_tasks_per_plan = 20,
+                            int max_tokens = 8192);
 
     TaskPlan Decompose(const std::string& instruction,
                        const std::string& project_id = {},
@@ -25,6 +26,7 @@ public:
 private:
     kabot::providers::LLMProvider& provider_;
     int max_tasks_per_plan_;
+    int max_tokens_;
 };
 
 }  // namespace kabot::agent::planning

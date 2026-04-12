@@ -167,6 +167,7 @@ struct TaskSystemConfig {
     int shutdown_timeout_s = 30;
     int max_tasks_per_plan = 20;
     std::string plan_work_default_mode = "plan_and_submit";
+    int max_plan_output_tokens = 8192;
 };
 
 struct QmdConfig {
