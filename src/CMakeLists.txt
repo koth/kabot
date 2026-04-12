@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(kabot LANGUAGES CXX)
+project(kabot LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,6 +58,7 @@ endif()
 option(KABOT_ENABLE_TELEGRAM "Enable Telegram channel support" ON)
 option(KABOT_ENABLE_LARK "Enable Lark channel support" ON)
 option(KABOT_ENABLE_QQBOT "Enable QQBot channel support" ON)
+option(KABOT_ENABLE_WEIXIN "Enable Weixin channel support" ON)
 option(KABOT_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 
 
@@ -213,6 +214,10 @@ if(KABOT_ENABLE_QQBOT)
   target_link_libraries(kabot_core INTERFACE qqbot_sdk)
 endif()
 
+if(KABOT_ENABLE_WEIXIN)
+  add_subdirectory(weixin)
+endif()
+
 # 收集所有源文件
 set(KABOT_SOURCES
   cli/commands.cpp
@@ -224,13 +229,25 @@ set(KABOT_SOURCES
   agent/context_builder.cpp
   agent/memory_store.cpp
   agent/skills_loader.cpp
+  agent/subagent/async_attribution.cpp
+  agent/subagent/builtin_agents.cpp
+  agent/subagent/subagent_context.cpp
+  agent/subagent/subagent_runner.cpp
+  agent/subagent/subagent_service.cpp
+  agent/subagent/subagent_task.cpp
+  agent/subagent/subagent_tool_filter.cpp
+  agent/subagent/subagent_transcript.cpp
+  agent/planning/task_decomposer.cpp
   agent/tools/filesystem.cpp
   agent/tools/cron.cpp
   agent/tools/tts.cpp
   agent/tools/message.cpp
+  agent/tools/plan_work.cpp
   agent/tools/shell.cpp
   agent/tools/spawn.cpp
+  agent/tools/todo.cpp
   agent/tools/tool_registry.cpp
+  agent/tools/tool_schema_validator.cpp
   agent/tools/web.cpp
   sandbox/sandbox_executor.cpp
   bus/message_bus.cpp
@@ -256,6 +273,9 @@ endif()
 
 add_executable(kabot_cli ${KABOT_SOURCES})
 target_link_libraries(kabot_cli PRIVATE kabot_core)
+if(KABOT_ENABLE_WEIXIN)
+  target_link_libraries(kabot_cli PRIVATE weixin_channel silk)
+endif()
 
 add_library(kabot_tts STATIC
   agent/tools/tts.cpp
@@ -294,13 +314,25 @@ add_executable(routing_tests
   agent/context_builder.cpp
   agent/memory_store.cpp
   agent/skills_loader.cpp
+  agent/subagent/async_attribution.cpp
+  agent/subagent/builtin_agents.cpp
+  agent/subagent/subagent_context.cpp
+  agent/subagent/subagent_runner.cpp
+  agent/subagent/subagent_service.cpp
+  agent/subagent/subagent_task.cpp
+  agent/subagent/subagent_tool_filter.cpp
+  agent/subagent/subagent_transcript.cpp
+  agent/planning/task_decomposer.cpp
   agent/tools/filesystem.cpp
   agent/tools/cron.cpp
   agent/tools/tts.cpp
   agent/tools/message.cpp
+  agent/tools/plan_work.cpp
   agent/tools/shell.cpp
   agent/tools/spawn.cpp
+  agent/tools/todo.cpp
   agent/tools/tool_registry.cpp
+  agent/tools/tool_schema_validator.cpp
   agent/tools/web.cpp
   sandbox/sandbox_executor.cpp
   cron/cron_service.cpp
@@ -320,6 +352,19 @@ add_executable(sandbox_tests
   sandbox/sandbox_executor.cpp
 )
 target_link_libraries(sandbox_tests PRIVATE kabot_core)
+
+add_executable(thread_pool_tests
+  thread_pool_tests.cpp
+)
+target_link_libraries(thread_pool_tests PRIVATE kabot_core)
+
+add_executable(task_decomposer_tests
+  task_decomposer_tests.cpp
+  agent/planning/task_decomposer.cpp
+  providers/llm_provider.cpp
+  providers/litellm_provider.cpp
+)
+target_link_libraries(task_decomposer_tests PRIVATE kabot_core)
 
 if(APPLE)
   target_link_options(kabot_cli PRIVATE "-Wl,-no_warn_duplicate_libraries")

@@ -11,6 +11,7 @@
 
 #include "agent/memory_store.hpp"
 #include "nlohmann/json.hpp"
+#include "utils/cancel_token.hpp"
 #include "utils/logging.hpp"
 
 namespace kabot::task {
@@ -138,8 +139,12 @@ void TaskRuntime::Start() {
     }
     LoadState();
     running_ = true;
+    const auto pool_size = std::max(1, config_.task_system.max_concurrent_tasks);
+    task_pool_ = std::make_unique<kabot::ThreadPool>(static_cast<std::size_t>(pool_size));
     EnsureDailySummaryJobs();
-    poll_thread_ = std::thread([this] { PollLoop(); });
+    for (const auto& local_agent : relay_.AutoClaimLocalAgents()) {
+        poll_threads_.emplace_back([this, local_agent] { AgentPollLoop(local_agent); });
+    }
 }
 
 void TaskRuntime::Stop() {
@@ -147,8 +152,15 @@ void TaskRuntime::Stop() {
         return;
     }
     running_ = false;
-    if (poll_thread_.joinable()) {
-        poll_thread_.join();
+    for (auto& t : poll_threads_) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+    poll_threads_.clear();
+    if (task_pool_) {
+        task_pool_->Shutdown();
+        task_pool_->WaitForEmpty(std::chrono::seconds(config_.task_system.shutdown_timeout_s));
     }
     RemoveDailySummaryJobs();
     SaveState();
@@ -216,27 +228,30 @@ std::string TaskRuntime::DumpStateJson() const {
     return json.dump(2);
 }
 
-void TaskRuntime::PollLoop() {
+void TaskRuntime::AgentPollLoop(const std::string& local_agent) {
     const auto poll_interval = std::max(5, config_.task_system.poll_interval_s);
     while (running_) {
-        for (const auto& local_agent : relay_.ManagedLocalAgents()) {
-            if (!running_) {
-                break;
-            }
-            if (HasPendingTaskForLocalAgent(local_agent)) {
-                continue;
-            }
+        if (!HasPendingTaskForLocalAgent(local_agent)) {
             const auto claim = relay_.ClaimNextTask(local_agent, true);
-            if (!claim.success || !claim.found || claim.task.task_id.empty()) {
-                continue;
+            if (claim.success && claim.found && !claim.task.task_id.empty()) {
+                const auto session_key = claim.task.session_key.empty()
+                    ? "task:" + local_agent + ":" + claim.task.task_id
+                    : claim.task.session_key;
+                {
+                    std::lock_guard<std::mutex> guard(mutex_);
+                    if (claimed_task_ids_.find(claim.task.task_id) != claimed_task_ids_.end()) {
+                        continue;
+                    }
+                    active_tasks_[local_agent] = ActiveTask{claim.task.task_id, session_key};
+                    claimed_task_ids_.insert(claim.task.task_id);
+                    SaveState();
+                }
+                if (task_pool_) {
+                    task_pool_->Submit([this, local_agent, task = claim.task] {
+                        ExecuteClaimedTask(local_agent, task);
+                    });
+                }
             }
-            const auto session_key = claim.task.session_key.empty()
-                ? "task:" + local_agent + ":" + claim.task.task_id
-                : claim.task.session_key;
-            MarkActiveTask(local_agent, claim.task.task_id, session_key);
-            std::thread([this, local_agent, task = claim.task] {
-                ExecuteClaimedTask(local_agent, task);
-            }).detach();
         }
         std::this_thread::sleep_for(std::chrono::seconds(poll_interval));
     }
@@ -290,12 +305,38 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
     bool waiting = false;
     kabot::relay::RelayTaskInteraction waiting_user{};
     std::string waiting_question;
+    kabot::CancelToken cancel_token;
+    std::atomic<bool> finished{false};
+
+    const auto timeout_s = std::max(0, config_.task_system.task_timeout_s);
+    const auto grace_s = std::max(0, config_.task_system.shutdown_timeout_s);
+
+    if (timeout_s > 0) {
+        std::thread([this, &cancel_token, &finished, local_agent, task_id = task.task_id, session_key, timeout_s, grace_s] {
+            std::this_thread::sleep_for(std::chrono::seconds(timeout_s));
+            if (finished.load()) return;
+            cancel_token.Cancel();
+            if (grace_s > 0) {
+                std::this_thread::sleep_for(std::chrono::seconds(grace_s));
+            }
+            if (finished.load()) return;
+            LOG_WARN("[task_runtime] task {} on agent {} hard-abandoned after timeout", task_id, local_agent);
+            ClearActiveTask(local_agent);
+            relay_.UpdateTaskStatus(local_agent, task_id, {
+                "failed",
+                "Task " + task_id + " timed out and was abandoned",
+                -1,
+                NowIso(),
+                session_key
+            });
+        }).detach();
+    }
 
     try {
-        const auto observer = [this, local_agent, task_id = task.task_id, session_key, 
+        const auto observer = [this, local_agent, task_id = task.task_id, session_key,
                                workspace, task, project_name](kabot::agent::DirectExecutionPhase phase) {
             const auto phase_summary = kabot::agent::DirectExecutionPhaseSummary(phase);
-            
+
             relay_.UpdateTaskStatus(local_agent, task_id, {
                 "running",
                 phase_summary,
@@ -304,9 +345,8 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
                 session_key
             });
 
-            // Write milestone memory on important phases
             if (phase == kabot::agent::DirectExecutionPhase::kCallingTools) {
-                WriteTaskMemory(workspace, task_id, project_name, "running", 
+                WriteTaskMemory(workspace, task_id, project_name, "running",
                                "Calling tools to process task");
             }
         };
@@ -332,9 +372,8 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             waiting_user.channel_instance = outbound.channel_instance;
             waiting_user.chat_id = outbound.chat_id;
             waiting_user.reply_to = task.interaction.reply_to;
-            
-            // Write waiting memory
-            WriteTaskMemory(workspace, task.task_id, project_name, "waiting_user", 
+
+            WriteTaskMemory(workspace, task.task_id, project_name, "waiting_user",
                            "Waiting for user input: " + waiting_question);
         };
 
@@ -343,7 +382,8 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
                                                   session_key,
                                                   observer,
                                                   target,
-                                                  outbound_observer);
+                                                  outbound_observer,
+                                                  cancel_token);
 
         if (waiting && !waiting_user.chat_id.empty()) {
             WaitingTask waiting_task{};
@@ -369,7 +409,7 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             }
             relay_.UpdateTaskStatus(local_agent, task.task_id, {
                 "waiting_user",
-                waiting_question.empty() ? "Waiting for user input on task " + task.task_id 
+                waiting_question.empty() ? "Waiting for user input on task " + task.task_id
                                         : waiting_question,
                 50,
                 NowIso(),
@@ -378,12 +418,12 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
                 {},
                 waiting_user
             });
+            finished.store(true);
             return;
         }
 
-        // Step 3: Task completed successfully
         ClearActiveTask(local_agent);
-        
+
         relay_.UpdateTaskStatus(local_agent, task.task_id, {
             "completed",
             "Task " + task.task_id + " finished successfully",
@@ -393,47 +433,51 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             result
         });
 
-        // Write completion memory
         std::string result_summary = result;
         if (result_summary.length() > 200) {
             result_summary = result_summary.substr(0, 197) + "...";
         }
-        WriteTaskMemory(workspace, task.task_id, project_name, "completed", 
+        WriteTaskMemory(workspace, task.task_id, project_name, "completed",
                        "Task finished successfully", result_summary);
 
     } catch (const std::exception& ex) {
         ClearActiveTask(local_agent);
-        
+
+        const bool cancelled = cancel_token.IsCancelled();
         relay_.UpdateTaskStatus(local_agent, task.task_id, {
             "failed",
-            "Task " + task.task_id + " failed because " + ex.what(),
+            cancelled ? "Task " + task.task_id + " cancelled after timeout"
+                      : "Task " + task.task_id + " failed because " + ex.what(),
             -1,
             NowIso(),
             session_key,
             {},
-            ex.what()
+            cancelled ? "task cancelled by timeout" : ex.what()
         });
 
-        // Write failure memory
-        WriteTaskMemory(workspace, task.task_id, project_name, "failed", 
-                       "Task failed", ex.what());
+        WriteTaskMemory(workspace, task.task_id, project_name, "failed",
+                       cancelled ? "Task cancelled by timeout" : "Task failed",
+                       cancelled ? "task cancelled by timeout" : ex.what());
     } catch (...) {
         ClearActiveTask(local_agent);
-        
+
+        const bool cancelled = cancel_token.IsCancelled();
         relay_.UpdateTaskStatus(local_agent, task.task_id, {
             "failed",
-            "Task " + task.task_id + " failed because unknown task runtime error",
+            cancelled ? "Task " + task.task_id + " cancelled after timeout"
+                      : "Task " + task.task_id + " failed because unknown task runtime error",
             -1,
             NowIso(),
             session_key,
             {},
-            "unknown task runtime error"
+            cancelled ? "task cancelled by timeout" : "unknown task runtime error"
         });
 
-        // Write failure memory
-        WriteTaskMemory(workspace, task.task_id, project_name, "failed", 
-                       "Task failed with unknown error");
+        WriteTaskMemory(workspace, task.task_id, project_name, "failed",
+                       cancelled ? "Task cancelled by timeout" : "Task failed with unknown error");
     }
+
+    finished.store(true);
 }
 
 bool TaskRuntime::ResumeWaitingTask(const WaitingTask& waiting_task,
@@ -463,13 +507,15 @@ bool TaskRuntime::ResumeWaitingTask(const WaitingTask& waiting_task,
         waiting_user.chat_id = outbound.chat_id;
         waiting_user.reply_to = waiting_task.reply_to;
     };
+    kabot::CancelToken cancel_token{};
     final_result = agents_.ProcessDirect(waiting_task.local_agent,
                                          std::string("Continue the existing task. The user has replied to your earlier clarification request.\n\n") +
                                              "User reply:\n" + user_reply,
                                          waiting_task.session_key,
                                          {},
                                          target,
-                                         outbound_observer);
+                                         outbound_observer,
+                                         cancel_token);
     if (waiting && !waiting_user.chat_id.empty()) {
         WaitingTask next_waiting = waiting_task;
         next_waiting.question = waiting_question;
@@ -510,6 +556,11 @@ bool TaskRuntime::HasPendingTaskForLocalAgent(const std::string& local_agent) co
     });
 }
 
+bool TaskRuntime::IsTaskClaimed(const std::string& task_id) const {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return claimed_task_ids_.find(task_id) != claimed_task_ids_.end();
+}
+
 void TaskRuntime::MarkActiveTask(const std::string& local_agent,
                                  const std::string& task_id,
                                  const std::string& session_key) {
@@ -540,7 +591,11 @@ void TaskRuntime::EnsureDailySummaryJobs() {
         job.payload.agent = local_agent;
         job.payload.message = "upload daily memory";
         const auto added = cron_->AddJob(job);
-        cron_job_ids_.push_back(added.id);
+        if (added.has_value()) {
+            cron_job_ids_.push_back(added->id);
+        } else {
+            LOG_ERROR("[task_runtime] Failed to add daily summary cron job");
+        }
     }
 }
 
@@ -803,82 +858,44 @@ bool TaskRuntime::ShouldWaitForUser(const kabot::bus::InboundMessage& msg,
     return false;
 }
 
+namespace {
+
+void AtomicWriteJson(const std::filesystem::path& path, const nlohmann::json& json) {
+    std::filesystem::create_directories(path.parent_path());
+    const auto temp_path = path.string() + ".tmp";
+    std::ofstream output(temp_path, std::ios::trunc);
+    if (!output.is_open()) {
+        return;
+    }
+    output << json.dump(2);
+    output.flush();
+    if (!output.good()) {
+        return;
+    }
+    output.close();
+    std::filesystem::rename(temp_path, path);
+}
+
+}  // namespace
+
 void TaskRuntime::LoadState() {
     std::lock_guard<std::mutex> guard(mutex_);
     daily_summary_records_.clear();
     waiting_tasks_.clear();
     active_tasks_.clear();
-
-    std::ifstream input(StatePath());
-    if (!input.is_open()) {
-        return;
-    }
-
-    nlohmann::json json;
-    input >> json;
-    if (!json.is_object()) {
-        return;
-    }
-
-    if (json.contains("dailySummaries") && json["dailySummaries"].is_array()) {
-        for (const auto& item : json["dailySummaries"]) {
-            if (!item.is_object()) {
-                continue;
-            }
-            const auto local_agent = item.value("localAgent", std::string());
-            if (local_agent.empty()) {
-                continue;
-            }
-            daily_summary_records_[local_agent] = DailySummaryRecord{
-                item.value("summaryDate", std::string()),
-                item.value("uploadedAt", std::string()),
-                item.value("status", std::string()),
-                item.value("message", std::string())
-            };
-        }
-    }
-
-    if (json.contains("waitingTasks") && json["waitingTasks"].is_array()) {
-        for (const auto& item : json["waitingTasks"]) {
-            if (!item.is_object()) {
-                continue;
-            }
-            WaitingTask waiting_task{};
-            waiting_task.task_id = item.value("taskId", std::string());
-            waiting_task.local_agent = item.value("localAgent", std::string());
-            waiting_task.session_key = item.value("sessionKey", std::string());
-            waiting_task.question = item.value("question", std::string());
-            waiting_task.channel = item.value("channel", std::string());
-            waiting_task.channel_instance = item.value("channelInstance", std::string());
-            waiting_task.chat_id = item.value("chatId", std::string());
-            waiting_task.reply_to = item.value("replyTo", std::string());
-            waiting_task.agent_name = item.value("agentName", std::string());
-            waiting_task.updated_at = item.value("updatedAt", std::string());
-            if (waiting_task.channel_instance.empty() || waiting_task.chat_id.empty()) {
-                continue;
-            }
-            waiting_tasks_[BuildWaitingKey(waiting_task.channel_instance,
-                                           waiting_task.agent_name,
-                                           waiting_task.chat_id)] = std::move(waiting_task);
-        }
-    }
+    claimed_task_ids_.clear();
+    LoadWaitingTasks();
+    LoadDailySummaries();
 }
 
 void TaskRuntime::SaveState() const {
+    SaveWaitingTasks();
+    SaveDailySummaries();
+}
+
+void TaskRuntime::SaveWaitingTasks() const {
     nlohmann::json json = nlohmann::json::object();
-    json["dailySummaries"] = nlohmann::json::array();
     json["waitingTasks"] = nlohmann::json::array();
-
-    for (const auto& [local_agent, record] : daily_summary_records_) {
-        json["dailySummaries"].push_back({
-            {"localAgent", local_agent},
-            {"summaryDate", record.summary_date},
-            {"uploadedAt", record.uploaded_at},
-            {"status", record.status},
-            {"message", record.message}
-        });
-    }
-
     for (const auto& [key, task] : waiting_tasks_) {
         json["waitingTasks"].push_back({
             {"key", key},
@@ -894,13 +911,83 @@ void TaskRuntime::SaveState() const {
             {"updatedAt", task.updated_at}
         });
     }
+    AtomicWriteJson(WaitingTasksStatePath(), json);
+}
 
-    std::filesystem::create_directories(StatePath().parent_path());
-    std::ofstream output(StatePath(), std::ios::trunc);
-    if (!output.is_open()) {
+void TaskRuntime::SaveDailySummaries() const {
+    nlohmann::json json = nlohmann::json::object();
+    json["dailySummaries"] = nlohmann::json::array();
+    for (const auto& [local_agent, record] : daily_summary_records_) {
+        json["dailySummaries"].push_back({
+            {"localAgent", local_agent},
+            {"summaryDate", record.summary_date},
+            {"uploadedAt", record.uploaded_at},
+            {"status", record.status},
+            {"message", record.message}
+        });
+    }
+    AtomicWriteJson(DailySummaryStatePath(), json);
+}
+
+void TaskRuntime::LoadWaitingTasks() {
+    std::ifstream input(WaitingTasksStatePath());
+    if (!input.is_open()) {
         return;
     }
-    output << json.dump(2);
+    nlohmann::json json;
+    input >> json;
+    if (!json.is_object() || !json.contains("waitingTasks") || !json["waitingTasks"].is_array()) {
+        return;
+    }
+    for (const auto& item : json["waitingTasks"]) {
+        if (!item.is_object()) {
+            continue;
+        }
+        WaitingTask waiting_task{};
+        waiting_task.task_id = item.value("taskId", std::string());
+        waiting_task.local_agent = item.value("localAgent", std::string());
+        waiting_task.session_key = item.value("sessionKey", std::string());
+        waiting_task.question = item.value("question", std::string());
+        waiting_task.channel = item.value("channel", std::string());
+        waiting_task.channel_instance = item.value("channelInstance", std::string());
+        waiting_task.chat_id = item.value("chatId", std::string());
+        waiting_task.reply_to = item.value("replyTo", std::string());
+        waiting_task.agent_name = item.value("agentName", std::string());
+        waiting_task.updated_at = item.value("updatedAt", std::string());
+        if (waiting_task.channel_instance.empty() || waiting_task.chat_id.empty()) {
+            continue;
+        }
+        waiting_tasks_[BuildWaitingKey(waiting_task.channel_instance,
+                                       waiting_task.agent_name,
+                                       waiting_task.chat_id)] = std::move(waiting_task);
+    }
+}
+
+void TaskRuntime::LoadDailySummaries() {
+    std::ifstream input(DailySummaryStatePath());
+    if (!input.is_open()) {
+        return;
+    }
+    nlohmann::json json;
+    input >> json;
+    if (!json.is_object() || !json.contains("dailySummaries") || !json["dailySummaries"].is_array()) {
+        return;
+    }
+    for (const auto& item : json["dailySummaries"]) {
+        if (!item.is_object()) {
+            continue;
+        }
+        const auto local_agent = item.value("localAgent", std::string());
+        if (local_agent.empty()) {
+            continue;
+        }
+        daily_summary_records_[local_agent] = DailySummaryRecord{
+            item.value("summaryDate", std::string()),
+            item.value("uploadedAt", std::string()),
+            item.value("status", std::string()),
+            item.value("message", std::string())
+        };
+    }
 }
 
 std::string TaskRuntime::SummaryJobId(const std::string& local_agent) const {
@@ -914,8 +1001,12 @@ std::string TaskRuntime::WaitingKey(const kabot::bus::InboundMessage& msg) const
         msg.chat_id);
 }
 
-std::filesystem::path TaskRuntime::StatePath() const {
-    return std::filesystem::path(config_.agents.defaults.workspace) / ".kabot" / "task_runtime_state.json";
+std::filesystem::path TaskRuntime::WaitingTasksStatePath() const {
+    return std::filesystem::path(config_.agents.defaults.workspace) / ".kabot" / "task_runtime_waiting_tasks.json";
+}
+
+std::filesystem::path TaskRuntime::DailySummaryStatePath() const {
+    return std::filesystem::path(config_.agents.defaults.workspace) / ".kabot" / "task_runtime_daily_summary.json";
 }
 
 std::string TaskRuntime::TodayDate() const {

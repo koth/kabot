@@ -200,6 +200,9 @@ void ApplyRelayManagedAgentConfig(RelayManagedAgentConfig& target, const nlohman
     if (source.contains("reconnectMaxDelayMs") && source["reconnectMaxDelayMs"].is_number_integer()) {
         target.reconnect_max_delay_ms = source["reconnectMaxDelayMs"].get<int>();
     }
+    if (source.contains("autoClaimTasks") && source["autoClaimTasks"].is_boolean()) {
+        target.auto_claim_tasks = source["autoClaimTasks"].get<bool>();
+    }
 }
 
 void ApplyBindingConfig(ChannelBindingConfig& target, const nlohmann::json& source) {
@@ -322,6 +325,49 @@ void ApplyQQBotConfig(QQBotConfig& target, const nlohmann::json& source) {
     }
 }
 
+void ApplyWeixinConfig(WeixinConfig& target, const nlohmann::json& source) {
+    if (!source.is_object()) {
+        return;
+    }
+    if (source.contains("name") && source["name"].is_string()) {
+        target.name = source["name"].get<std::string>();
+    }
+    if (source.contains("enabled") && source["enabled"].is_boolean()) {
+        target.enabled = source["enabled"].get<bool>();
+    }
+    // Note: token is NOT loaded from config file.
+    // It is obtained via QR code login and stored in ~/.kabot/
+    if (source.contains("accountId") && source["accountId"].is_string()) {
+        target.account_id = source["accountId"].get<std::string>();
+    }
+    if (source.contains("baseUrl") && source["baseUrl"].is_string()) {
+        target.base_url = source["baseUrl"].get<std::string>();
+    }
+    if (source.contains("cdnBaseUrl") && source["cdnBaseUrl"].is_string()) {
+        target.cdn_base_url = source["cdnBaseUrl"].get<std::string>();
+    }
+    if (source.contains("routeTag") && source["routeTag"].is_number_integer()) {
+        target.route_tag = source["routeTag"].get<int>();
+    }
+    if (source.contains("appId") && source["appId"].is_string()) {
+        target.app_id = source["appId"].get<std::string>();
+    }
+    if (source.contains("appVersion") && source["appVersion"].is_string()) {
+        target.app_version = source["appVersion"].get<std::string>();
+    }
+    if (source.contains("allowFrom") && source["allowFrom"].is_array()) {
+        target.allow_from.clear();
+        for (const auto& item : source["allowFrom"]) {
+            if (item.is_string()) {
+                target.allow_from.push_back(item.get<std::string>());
+            }
+        }
+    }
+    if (source.contains("binding")) {
+        ApplyBindingConfig(target.binding, source["binding"]);
+    }
+}
+
 void NormalizeConfig(Config& config, const AgentDefaults& previous_defaults) {
     if (config.agents.instances.empty()) {
         AgentInstanceConfig agent{};
@@ -420,6 +466,17 @@ void NormalizeConfig(Config& config, const AgentDefaults& previous_defaults) {
             instance.qqbot.name = instance.name;
             config.channels.instances.push_back(instance);
         }
+        if (config.channels.weixin.enabled) {
+            ChannelInstanceConfig instance{};
+            instance.name = config.channels.weixin.name.empty() ? "weixin" : config.channels.weixin.name;
+            instance.type = "weixin";
+            instance.enabled = config.channels.weixin.enabled;
+            instance.allow_from = config.channels.weixin.allow_from;
+            instance.binding = config.channels.weixin.binding;
+            instance.weixin = config.channels.weixin;
+            instance.weixin.name = instance.name;
+            config.channels.instances.push_back(instance);
+        }
     }
 
     for (auto& instance : config.channels.instances) {
@@ -454,6 +511,18 @@ void NormalizeConfig(Config& config, const AgentDefaults& previous_defaults) {
             }
             instance.enabled = instance.enabled && !instance.qqbot.app_id.empty()
                 && (!instance.qqbot.client_secret.empty() || !instance.qqbot.token.empty());
+        } else if (instance.type == "weixin") {
+            if (instance.name.empty()) {
+                instance.name = instance.weixin.name.empty() ? "weixin" : instance.weixin.name;
+            }
+            instance.weixin.name = instance.name;
+            instance.allow_from = instance.allow_from.empty() ? instance.weixin.allow_from : instance.allow_from;
+            if (instance.binding.agent.empty()) {
+                instance.binding = instance.weixin.binding;
+            }
+            // Token is obtained via QR code login and stored in ~/.openclaw/accounts/
+            // Enabled if account_id is set (which determines where to load token from)
+            instance.enabled = instance.enabled && !instance.weixin.account_id.empty();
         }
 
         if (instance.binding.agent.empty()) {
@@ -531,6 +600,9 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         if (channels.contains("qqbot") && channels["qqbot"].is_object()) {
             ApplyQQBotConfig(config.channels.qqbot, channels["qqbot"]);
         }
+        if (channels.contains("weixin") && channels["weixin"].is_object()) {
+            ApplyWeixinConfig(config.channels.weixin, channels["weixin"]);
+        }
         if (channels.contains("instances") && channels["instances"].is_array()) {
             config.channels.instances.clear();
             for (const auto& item : channels["instances"]) {
@@ -566,6 +638,9 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
                 } else if (instance.type == "qqbot") {
                     instance.qqbot = config.channels.qqbot;
                     ApplyQQBotConfig(instance.qqbot, item);
+                } else if (instance.type == "weixin") {
+                    instance.weixin = config.channels.weixin;
+                    ApplyWeixinConfig(instance.weixin, item);
                 }
                 config.channels.instances.push_back(instance);
             }
@@ -629,6 +704,21 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         }
         if (task_system.contains("dailySummaryHourLocal") && task_system["dailySummaryHourLocal"].is_number_integer()) {
             config.task_system.daily_summary_hour_local = task_system["dailySummaryHourLocal"].get<int>();
+        }
+        if (task_system.contains("maxConcurrentTasks") && task_system["maxConcurrentTasks"].is_number_integer()) {
+            config.task_system.max_concurrent_tasks = task_system["maxConcurrentTasks"].get<int>();
+        }
+        if (task_system.contains("taskTimeoutS") && task_system["taskTimeoutS"].is_number_integer()) {
+            config.task_system.task_timeout_s = task_system["taskTimeoutS"].get<int>();
+        }
+        if (task_system.contains("shutdownTimeoutS") && task_system["shutdownTimeoutS"].is_number_integer()) {
+            config.task_system.shutdown_timeout_s = task_system["shutdownTimeoutS"].get<int>();
+        }
+        if (task_system.contains("maxTasksPerPlan") && task_system["maxTasksPerPlan"].is_number_integer()) {
+            config.task_system.max_tasks_per_plan = task_system["maxTasksPerPlan"].get<int>();
+        }
+        if (task_system.contains("planWorkDefaultMode") && task_system["planWorkDefaultMode"].is_string()) {
+            config.task_system.plan_work_default_mode = task_system["planWorkDefaultMode"].get<std::string>();
         }
     }
 
@@ -1098,6 +1188,49 @@ Config LoadConfig(const std::filesystem::path& config_path) {
             config.task_system.daily_summary_hour_local);
     }
 
+    const auto task_system_max_concurrent = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__MAX_CONCURRENT_TASKS",
+        "KABOT_TASK_SYSTEM_MAX_CONCURRENT_TASKS");
+    if (!task_system_max_concurrent.empty()) {
+        config.task_system.max_concurrent_tasks = ParseInt(
+            task_system_max_concurrent,
+            config.task_system.max_concurrent_tasks);
+    }
+
+    const auto task_system_timeout = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__TASK_TIMEOUT_S",
+        "KABOT_TASK_SYSTEM_TASK_TIMEOUT_S");
+    if (!task_system_timeout.empty()) {
+        config.task_system.task_timeout_s = ParseInt(
+            task_system_timeout,
+            config.task_system.task_timeout_s);
+    }
+
+    const auto task_system_shutdown_timeout = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__SHUTDOWN_TIMEOUT_S",
+        "KABOT_TASK_SYSTEM_SHUTDOWN_TIMEOUT_S");
+    if (!task_system_shutdown_timeout.empty()) {
+        config.task_system.shutdown_timeout_s = ParseInt(
+            task_system_shutdown_timeout,
+            config.task_system.shutdown_timeout_s);
+    }
+
+    const auto task_system_max_tasks_per_plan = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__MAX_TASKS_PER_PLAN",
+        "KABOT_TASK_SYSTEM_MAX_TASKS_PER_PLAN");
+    if (!task_system_max_tasks_per_plan.empty()) {
+        config.task_system.max_tasks_per_plan = ParseInt(
+            task_system_max_tasks_per_plan,
+            config.task_system.max_tasks_per_plan);
+    }
+
+    const auto task_system_plan_work_default_mode = GetEnvFallback(
+        "KABOT_TASK_SYSTEM__PLAN_WORK_DEFAULT_MODE",
+        "KABOT_TASK_SYSTEM_PLAN_WORK_DEFAULT_MODE");
+    if (!task_system_plan_work_default_mode.empty()) {
+        config.task_system.plan_work_default_mode = task_system_plan_work_default_mode;
+    }
+
     NormalizeConfig(config, json_agent_defaults);
     return config;
 }
@@ -1125,7 +1258,7 @@ std::vector<std::string> ValidateConfig(const Config& config) {
         } else if (!channel_names.insert(channel.name).second) {
             errors.push_back("duplicate channel instance name: " + channel.name);
         }
-        if (channel.type != "telegram" && channel.type != "lark" && channel.type != "qqbot") {
+        if (channel.type != "telegram" && channel.type != "lark" && channel.type != "qqbot" && channel.type != "weixin") {
             errors.push_back("unsupported channel type for instance " + channel.name + ": " + channel.type);
         }
         if (channel.type == "qqbot") {
@@ -1134,6 +1267,13 @@ std::vector<std::string> ValidateConfig(const Config& config) {
             }
             if (channel.qqbot.client_secret.empty() && channel.qqbot.token.empty()) {
                 errors.push_back("qqbot channel instance " + channel.name + " requires clientSecret or token");
+            }
+        }
+        if (channel.type == "weixin") {
+            // Token is obtained via QR code login and stored in ~/.kabot/accounts/
+            // account_id determines which account file to load the token from
+            if (channel.weixin.account_id.empty()) {
+                errors.push_back("weixin channel instance " + channel.name + " is missing account_id");
             }
         }
         if (channel.binding.agent.empty()) {

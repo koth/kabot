@@ -5,14 +5,14 @@
 
 namespace kabot::agent::tools {
 
-ExecTool::ExecTool(std::string working_dir)
+BashTool::BashTool(std::string working_dir)
     : working_dir_(std::move(working_dir)) {}
 
-std::string ExecTool::ParametersJson() const {
-    return R"({"type":"object","properties":{"command":{"type":"string"}},"required":["command"]})";
+std::string BashTool::ParametersJson() const {
+    return R"({"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"}},"required":["command"]})";
 }
 
-std::string ExecTool::Execute(const std::unordered_map<std::string, std::string>& params) {
+std::string BashTool::Execute(const std::unordered_map<std::string, std::string>& params) {
     auto it = params.find("command");
     if (it == params.end() || it->second.empty()) {
         return "Error: missing command";
@@ -30,17 +30,17 @@ std::string ExecTool::Execute(const std::unordered_map<std::string, std::string>
         return "Error: command timed out";
     }
     if (!result.output.empty()) {
-        LOG_INFO("[exec] stdout\n{}", result.output);
+        LOG_INFO("[bash] stdout\n{}", result.output);
     }
     if (!result.error.empty()) {
-        LOG_WARN("[exec] stderr\n{}", result.error);
+        LOG_WARN("[bash] stderr\n{}", result.error);
     }
     if (result.exit_code == 0) {
-        LOG_DEBUG("[exec] exit code 0");
+        LOG_DEBUG("[bash] exit code 0");
         return result.output.empty() ? "(no output)" : result.output;
     }
     if (!result.error.empty()) {
-        LOG_WARN("[exec] exit code {}", result.exit_code);
+        LOG_WARN("[bash] exit code {}", result.exit_code);
         return "[stderr]\n" + result.error +
                (result.output.empty() ? "" : "\n[stdout]\n" + result.output);
     }

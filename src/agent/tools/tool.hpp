@@ -12,6 +12,11 @@ public:
     virtual std::string Description() const = 0;
     virtual std::string ParametersJson() const = 0;
     virtual std::string Execute(const std::unordered_map<std::string, std::string>& params) = 0;
+
+    // Phase-2 architecture metadata
+    virtual bool IsReadOnly() const { return false; }
+    virtual bool IsDestructive() const { return false; }
+    virtual bool IsConcurrencySafe() const { return false; }
 };
 
 }  // namespace kabot::agent::tools

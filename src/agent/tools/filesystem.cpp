@@ -19,7 +19,7 @@ std::string GetParam(const std::unordered_map<std::string, std::string>& params,
 
 }  // namespace
 
-std::string ReadFileTool::ParametersJson() const {
+std::string FileReadTool::ParametersJson() const {
     return R"json({"type":"object","properties":{"path":{"type":"string","description":"File path to read"},"line":{"type":"integer","minimum":1,"description":"Start line number (1-based)"},"limit":{"type":"integer","minimum":1,"description":"Maximum number of lines to read"}},"required":["path"]})json";
 }
 
@@ -41,7 +41,7 @@ int GetParamInt(const std::unordered_map<std::string, std::string>& params,
 
 }  // namespace
 
-std::string ReadFileTool::Execute(const std::unordered_map<std::string, std::string>& params) {
+std::string FileReadTool::Execute(const std::unordered_map<std::string, std::string>& params) {
     const auto path = GetParam(params, "path");
     if (path.empty()) {
         return "Error: path is required";
@@ -85,11 +85,11 @@ std::string ReadFileTool::Execute(const std::unordered_map<std::string, std::str
     return oss.str();
 }
 
-std::string WriteFileTool::ParametersJson() const {
+std::string FileWriteTool::ParametersJson() const {
     return R"({"type":"object","properties":{"path":{"type":"string","description":"File path to write"},"content":{"type":"string","description":"Content to write"}},"required":["path","content"]})";
 }
 
-std::string WriteFileTool::Execute(const std::unordered_map<std::string, std::string>& params) {
+std::string FileWriteTool::Execute(const std::unordered_map<std::string, std::string>& params) {
     const auto path = GetParam(params, "path");
     const auto content = GetParam(params, "content");
     if (path.empty()) {
@@ -103,11 +103,11 @@ std::string WriteFileTool::Execute(const std::unordered_map<std::string, std::st
     return "OK";
 }
 
-std::string EditFileTool::ParametersJson() const {
+std::string FileEditTool::ParametersJson() const {
     return R"({"type":"object","properties":{"path":{"type":"string","description":"File path to edit"},"old_string":{"type":"string","description":"Exact existing text to replace"},"new_string":{"type":"string","description":"Replacement text"}},"required":["path","old_string","new_string"]})";
 }
 
-std::string EditFileTool::Execute(const std::unordered_map<std::string, std::string>& params) {
+std::string FileEditTool::Execute(const std::unordered_map<std::string, std::string>& params) {
     const auto path = GetParam(params, "path");
     const auto old_str = GetParam(params, "old_string");
     const auto new_str = GetParam(params, "new_string");
@@ -146,24 +146,11 @@ std::string ListDirTool::Execute(const std::unordered_map<std::string, std::stri
     if (path.empty()) {
         return "Error: path is required";
     }
-    try {
-        std::filesystem::path root(path);
-        if (!std::filesystem::exists(root)) {
-            return "Error: path does not exist";
-        }
-        if (!std::filesystem::is_directory(root)) {
-            return "Error: path is not a directory";
-        }
-        std::ostringstream oss;
-        for (const auto& entry : std::filesystem::directory_iterator(root)) {
-            oss << entry.path().filename().string() << "\n";
-        }
-        return oss.str();
-    } catch (const std::filesystem::filesystem_error& e) {
-        return std::string("Error: ") + e.what();
-    } catch (const std::exception& e) {
-        return std::string("Error: ") + e.what();
+    std::ostringstream oss;
+    for (const auto& entry : std::filesystem::directory_iterator(path)) {
+        oss << entry.path().filename().string() << "\n";
     }
+    return oss.str();
 }
 
 std::string GlobTool::ParametersJson() const {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -42,6 +43,21 @@ struct QQBotConfig {
     ChannelBindingConfig binding;
 };
 
+struct WeixinConfig {
+    std::string name = "weixin";
+    bool enabled = false;
+    // Note: token is obtained via QR code login and stored in ~/.kabot/
+    // Do NOT configure token here. Use account_id to identify the account.
+    std::string account_id;
+    std::string base_url = "https://ilinkai.weixin.qq.com";
+    std::string cdn_base_url = "https://novac2c.cdn.weixin.qq.com/c2c";
+    std::optional<int> route_tag;
+    std::vector<std::string> allow_from;
+    ChannelBindingConfig binding;
+    std::string app_id = "kabot";
+    std::string app_version = "1.0.0";
+};
+
 struct ChannelInstanceConfig {
     std::string name;
     std::string type;
@@ -51,12 +67,14 @@ struct ChannelInstanceConfig {
     TelegramConfig telegram;
     LarkConfig lark;
     QQBotConfig qqbot;
+    WeixinConfig weixin;
 };
 
 struct ChannelsConfig {
     TelegramConfig telegram;
     LarkConfig lark;
     QQBotConfig qqbot;
+    WeixinConfig weixin;
     std::vector<ChannelInstanceConfig> instances;
 };
 
@@ -124,6 +142,7 @@ struct RelayManagedAgentConfig {
     int heartbeat_interval_s = 0;
     int reconnect_initial_delay_ms = 0;
     int reconnect_max_delay_ms = 0;
+    bool auto_claim_tasks = false;
 };
 
 struct RelayConfig {
@@ -143,6 +162,11 @@ struct TaskSystemConfig {
     bool enabled = false;
     int poll_interval_s = 30;
     int daily_summary_hour_local = 22;
+    int max_concurrent_tasks = 4;
+    int task_timeout_s = 300;
+    int shutdown_timeout_s = 30;
+    int max_tasks_per_plan = 20;
+    std::string plan_work_default_mode = "plan_and_submit";
 };
 
 struct QmdConfig {
