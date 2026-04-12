@@ -270,6 +270,7 @@ void AgentLoop::SetRelayManager(kabot::relay::RelayManager* relay_manager) {
     relay_manager_ = relay_manager;
     if (auto* tool = tools_.Get("plan_work")) {
         if (auto* plan_tool = dynamic_cast<kabot::agent::tools::PlanWorkTool*>(tool)) {
+            plan_tool->SetRelayManager(relay_manager);
             plan_tool->SetContext({}, {}, {}, {});
         }
     }

@@ -29,6 +29,7 @@ public:
                     const std::string& channel_instance,
                     const std::string& chat_id,
                     const std::string& agent_name);
+    void SetRelayManager(kabot::relay::RelayManager* relay_manager);
 
     std::string Name() const override { return "plan_work"; }
     std::string Description() const override;

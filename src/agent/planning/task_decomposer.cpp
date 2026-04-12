@@ -3,6 +3,8 @@
 #include "nlohmann/json.hpp"
 #include "utils/logging.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <queue>
 #include <sstream>
 #include <unordered_map>
@@ -160,6 +162,39 @@ std::vector<PlannedTask> TaskDecomposer::TopoSort(std::vector<PlannedTask> tasks
     return result;
 }
 
+namespace {
+
+std::string StripMarkdownFences(std::string content) {
+    auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
+    auto first = std::find_if(content.begin(), content.end(), not_space);
+    if (first != content.end()) {
+        content.erase(content.begin(), first);
+    }
+    if (content.rfind("```json", 0) == 0) {
+        content.erase(0, 7);
+    } else if (content.rfind("```", 0) == 0) {
+        content.erase(0, 3);
+    }
+    auto last = std::find_if(content.rbegin(), content.rend(), not_space);
+    if (last != content.rend()) {
+        content.erase(last.base(), content.end());
+    }
+    if (content.size() >= 3 && content.compare(content.size() - 3, 3, "```") == 0) {
+        content.erase(content.size() - 3);
+    }
+    auto inner_first = std::find_if(content.begin(), content.end(), not_space);
+    if (inner_first != content.begin()) {
+        content.erase(content.begin(), inner_first);
+    }
+    auto inner_last = std::find_if(content.rbegin(), content.rend(), not_space);
+    if (inner_last != content.rend() && inner_last.base() != content.end()) {
+        content.erase(inner_last.base(), content.end());
+    }
+    return content;
+}
+
+}  // namespace
+
 TaskPlan TaskDecomposer::Decompose(const std::string& instruction,
                                    const std::string& project_id,
                                    const std::string& merge_request,
@@ -180,8 +215,16 @@ TaskPlan TaskDecomposer::Decompose(const std::string& instruction,
             4096,
             0.3);
 
-        auto json = nlohmann::json::parse(response.content, nullptr, false);
+        if (response.content.empty()) {
+            LOG_WARN("[task_decomposer] LLM returned empty content for decomposition");
+            plan.error = "LLM returned empty decomposition response";
+            return plan;
+        }
+
+        std::string raw = StripMarkdownFences(response.content);
+        auto json = nlohmann::json::parse(raw, nullptr, false);
         if (json.is_discarded()) {
+            LOG_WARN("[task_decomposer] failed to parse LLM response as JSON. raw={}", raw);
             plan.error = "failed to parse LLM decomposition response as JSON";
             return plan;
         }

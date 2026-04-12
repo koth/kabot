@@ -26,6 +26,10 @@ void PlanWorkTool::SetContext(const std::string& channel,
     agent_name_ = agent_name;
 }
 
+void PlanWorkTool::SetRelayManager(kabot::relay::RelayManager* relay_manager) {
+    relay_manager_ = relay_manager;
+}
+
 std::string PlanWorkTool::Description() const {
     return "Decompose a high-level project instruction into a structured list of tasks and optionally submit them to the relay server.";
 }
@@ -87,22 +91,28 @@ std::string PlanWorkTool::Execute(const std::unordered_map<std::string, std::str
     std::string project_description;
     std::string context_note;
     if (!project_id.empty() && relay_manager_) {
+        LOG_INFO("[plan_work] querying project info for project_id={}", project_id);
         auto query_result = relay_manager_->QueryProject(project_id);
         if (query_result.success) {
             project_description = query_result.info.description;
             if (project_description.empty()) {
                 context_note = "Note: project found on relay server but has no description. Decomposing based on instruction only.\n\n";
+                LOG_INFO("[plan_work] project {} found but description is empty", project_id);
             } else {
                 context_note = "Project context loaded.\n\n";
+                LOG_INFO("[plan_work] loaded project {} description ({} chars)", project_id, project_description.size());
             }
         } else {
             context_note = "Note: could not fetch project description from relay server (" +
                            (query_result.message.empty() ? std::to_string(query_result.http_status) : query_result.message) +
                            "). Decomposing based on instruction only.\n\n";
-            LOG_WARN("[plan_work] failed to query project {}: {}", project_id, query_result.message);
+            LOG_WARN("[plan_work] failed to query project {}: http_status={} message={}", project_id, query_result.http_status, query_result.message);
         }
     } else if (!project_id.empty()) {
         context_note = "Note: relay manager not available. Skipping project context lookup.\n\n";
+        LOG_INFO("[plan_work] relay_manager_ is null, skipping project query for project_id={}", project_id);
+    } else {
+        LOG_INFO("[plan_work] no project_id provided, decomposing by instruction only");
     }
 
     kabot::agent::planning::TaskDecomposer decomposer(provider_, task_config_.max_tasks_per_plan);
