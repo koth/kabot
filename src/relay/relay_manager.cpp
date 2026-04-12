@@ -492,8 +492,7 @@ public:
     explicit TlsRelayHttpSession(const kabot::config::RelayManagedAgentConfig& config)
         : config_(config)
         , resolver_(ioc_)
-        , ssl_ctx_(ssl::context::tls_client)
-        , stream_(ioc_, ssl_ctx_) {
+        , ssl_ctx_(ssl::context::tls_client) {
         ssl_ctx_.set_default_verify_paths();
         ssl_ctx_.set_verify_mode(config_.skip_tls_verify ? ssl::verify_none : ssl::verify_peer);
     }
@@ -506,8 +505,8 @@ public:
         try {
             beast::flat_buffer buffer;
             http::response<http::string_body> response;
-            http::write(stream_, request);
-            http::read(stream_, buffer, response);
+            http::write(*stream_, request);
+            http::read(*stream_, buffer, response);
             return response;
         } catch (const std::exception&) {
             connected_ = false;
@@ -515,31 +514,33 @@ public:
             Connect();
             beast::flat_buffer buffer;
             http::response<http::string_body> response;
-            http::write(stream_, request);
-            http::read(stream_, buffer, response);
+            http::write(*stream_, request);
+            http::read(*stream_, buffer, response);
             return response;
         }
     }
 
     void Close() override {
-        beast::error_code ec;
-        // Avoid graceful TLS shutdown to prevent "protocol is shutdown" errors
-        // when the peer already closed the underlying TCP connection.
-        beast::get_lowest_layer(stream_).socket().shutdown(tcp::socket::shutdown_both, ec);
-        beast::get_lowest_layer(stream_).socket().close(ec);
+        if (stream_) {
+            beast::error_code ec;
+            beast::get_lowest_layer(*stream_).socket().shutdown(tcp::socket::shutdown_both, ec);
+            beast::get_lowest_layer(*stream_).socket().close(ec);
+            stream_.reset();
+        }
         connected_ = false;
     }
 
 private:
     void Connect() {
+        stream_ = std::make_unique<beast::ssl_stream<beast::tcp_stream>>(ioc_, ssl_ctx_);
         if (!IsIpLiteral(config_.host)) {
-            if (!SSL_set_tlsext_host_name(stream_.native_handle(), config_.host.c_str())) {
+            if (!SSL_set_tlsext_host_name(stream_->native_handle(), config_.host.c_str())) {
                 throw std::runtime_error("failed to set TLS SNI host");
             }
         }
         auto endpoints = resolver_.resolve(config_.host, std::to_string(config_.port));
-        beast::get_lowest_layer(stream_).connect(endpoints);
-        stream_.handshake(ssl::stream_base::client);
+        beast::get_lowest_layer(*stream_).connect(endpoints);
+        stream_->handshake(ssl::stream_base::client);
         connected_ = true;
     }
 
@@ -547,7 +548,7 @@ private:
     net::io_context ioc_;
     tcp::resolver resolver_;
     ssl::context ssl_ctx_;
-    beast::ssl_stream<beast::tcp_stream> stream_;
+    std::unique_ptr<beast::ssl_stream<beast::tcp_stream>> stream_;
     bool connected_ = false;
 };
 
