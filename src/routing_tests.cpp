@@ -522,27 +522,7 @@ void TestTaskRuntimeStateDumpContainsCoreFields() {
     Expect(state.contains("waitingTasks"), "expected runtime state dump to contain waitingTasks");
 }
 
-void TestPlanWorkToolPlanOnlyModeReturnsPreview() {
-    PlanWorkStubProvider provider;
-    kabot::config::TaskSystemConfig task_config;
-    task_config.max_tasks_per_plan = 5;
-    task_config.plan_work_default_mode = "plan_and_submit";
-
-    kabot::agent::tools::PlanWorkTool tool(provider, task_config, nullptr);
-    std::unordered_map<std::string, std::string> params;
-    params["instruction"] = "Build a todo app";
-    params["mode"] = "plan_only";
-
-    auto result = tool.Execute(params);
-    Expect(result.find("Setup project") != std::string::npos,
-           "expected preview to mention 'Setup project'");
-    Expect(result.find("Write tests") != std::string::npos,
-           "expected preview to mention 'Write tests'");
-    Expect(result.find("Error:") == std::string::npos,
-           "expected no error in plan_only mode with valid plan");
-}
-
-void TestPlanWorkToolPlanAndSubmitRequiresRelayManager() {
+void TestPlanWorkToolRequiresRelayManager() {
     PlanWorkStubProvider provider;
     kabot::config::TaskSystemConfig task_config;
     task_config.max_tasks_per_plan = 5;
@@ -550,11 +530,10 @@ void TestPlanWorkToolPlanAndSubmitRequiresRelayManager() {
     kabot::agent::tools::PlanWorkTool tool(provider, task_config, nullptr);
     std::unordered_map<std::string, std::string> params;
     params["instruction"] = "Build a todo app";
-    params["mode"] = "plan_and_submit";
 
     auto result = tool.Execute(params);
     Expect(result.find("relay manager not available") != std::string::npos,
-           "expected error when relay manager is missing in plan_and_submit mode");
+           "expected error when relay manager is missing");
 }
 
 void TestPlanWorkToolProjectContextIsInherited() {
@@ -567,29 +546,11 @@ void TestPlanWorkToolProjectContextIsInherited() {
 
     std::unordered_map<std::string, std::string> params;
     params["instruction"] = "Refactor auth";
-    params["mode"] = "plan_only";
     params["project_context"] = R"({"project_id":"proj-42","merge_request":"mr-7"})";
 
     auto result = tool.Execute(params);
-    Expect(result.find("Error:") == std::string::npos,
-           "expected no error when project_context is valid");
-    Expect(result.find("Task plan created") != std::string::npos,
-           "expected a plan summary");
-}
-
-void TestPlanWorkToolDefaultModeFallback() {
-    PlanWorkStubProvider provider;
-    kabot::config::TaskSystemConfig task_config;
-    task_config.max_tasks_per_plan = 5;
-    task_config.plan_work_default_mode = "plan_only";
-
-    kabot::agent::tools::PlanWorkTool tool(provider, task_config, nullptr);
-    std::unordered_map<std::string, std::string> params;
-    params["instruction"] = "Build a todo app";
-
-    auto result = tool.Execute(params);
-    Expect(result.find("Task plan created") != std::string::npos,
-           "expected plan_only fallback to produce a preview");
+    Expect(result.find("relay manager not available") != std::string::npos,
+           "expected error when relay manager is missing even with valid project_context");
 }
 
 void TestPlanWorkToolFallbackWithoutRelayManager() {
@@ -600,15 +561,11 @@ void TestPlanWorkToolFallbackWithoutRelayManager() {
     kabot::agent::tools::PlanWorkTool tool(provider, task_config, nullptr);
     std::unordered_map<std::string, std::string> params;
     params["instruction"] = "Build a todo app";
-    params["mode"] = "plan_only";
     params["project_context"] = R"({"project_id":"proj-42"})";
 
     auto result = tool.Execute(params);
-    // Without a relay manager, it should still decompose (no crash) but won't fetch project description.
-    Expect(result.find("Task plan created") != std::string::npos,
-           "expected plan preview when relay manager is null");
-    Expect(result.find("Note: could not fetch") == std::string::npos,
-           "expected no fetch-failure note when relay manager is simply absent");
+    Expect(result.find("relay manager not available") != std::string::npos,
+           "expected error when relay manager is null");
 }
 
 void TestRelayManagerQueryProject() {
@@ -670,10 +627,8 @@ int main() {
     TestTaskRuntimeClearsWaitingTaskOnNonWaitingReply();
     TestTaskRuntimeHandleInboundReturnsFalseWhenNoWaitingTask();
     TestTaskRuntimeStateDumpContainsCoreFields();
-    TestPlanWorkToolPlanOnlyModeReturnsPreview();
-    TestPlanWorkToolPlanAndSubmitRequiresRelayManager();
+    TestPlanWorkToolRequiresRelayManager();
     TestPlanWorkToolProjectContextIsInherited();
-    TestPlanWorkToolDefaultModeFallback();
     TestPlanWorkToolFallbackWithoutRelayManager();
     TestRelayManagerQueryProject();
     std::cout << "routing_tests passed" << std::endl;

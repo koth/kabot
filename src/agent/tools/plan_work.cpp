@@ -31,7 +31,7 @@ void PlanWorkTool::SetRelayManager(kabot::relay::RelayManager* relay_manager) {
 }
 
 std::string PlanWorkTool::Description() const {
-    return "Decompose a high-level project instruction into a structured list of tasks and submit them to the relay server by default.";
+    return "Decompose a high-level project instruction into a structured list of tasks and submit them to the relay server.";
 }
 
 std::string PlanWorkTool::ParametersJson() const {
@@ -41,11 +41,6 @@ std::string PlanWorkTool::ParametersJson() const {
             "instruction": {
                 "type": "string",
                 "description": "The high-level project instruction to decompose into tasks"
-            },
-            "mode": {
-                "type": "string",
-                "enum": ["plan_and_submit", "plan_only"],
-                "description": "Controls whether to submit the generated tasks. Defaults to plan_and_submit. Only use plan_only when the user explicitly asks for a preview without submitting tasks."
             },
             "project_context": {
                 "type": "object",
@@ -61,14 +56,6 @@ std::string PlanWorkTool::Execute(const std::unordered_map<std::string, std::str
     if (it_instruction == params.end() || it_instruction->second.empty()) {
         return "Error: missing required 'instruction' parameter";
     }
-
-    const std::string mode = [this, &params]() -> std::string {
-        auto it = params.find("mode");
-        if (it != params.end() && (it->second == "plan_only" || it->second == "plan_and_submit")) {
-            return it->second;
-        }
-        return task_config_.plan_work_default_mode;
-    }();
 
     std::string project_id;
     std::string merge_request;
@@ -120,22 +107,6 @@ std::string PlanWorkTool::Execute(const std::unordered_map<std::string, std::str
 
     if (!plan.success) {
         return std::string("Error: ") + plan.error;
-    }
-
-    if (mode == "plan_only") {
-        std::ostringstream oss;
-        if (!context_note.empty()) {
-            oss << context_note;
-        }
-        oss << "Task plan created (" << plan.tasks.size() << " tasks):\n";
-        for (std::size_t i = 0; i < plan.tasks.size(); ++i) {
-            oss << (i + 1) << ". " << plan.tasks[i].title;
-            if (!plan.tasks[i].depends_on.empty()) {
-                oss << " [depends on: " << plan.tasks[i].depends_on.size() << " task(s)]";
-            }
-            oss << "\n";
-        }
-        return oss.str();
     }
 
     if (!relay_manager_) {

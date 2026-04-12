@@ -717,10 +717,7 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         if (task_system.contains("maxTasksPerPlan") && task_system["maxTasksPerPlan"].is_number_integer()) {
             config.task_system.max_tasks_per_plan = task_system["maxTasksPerPlan"].get<int>();
         }
-        if (task_system.contains("planWorkDefaultMode") && task_system["planWorkDefaultMode"].is_string()) {
-            config.task_system.plan_work_default_mode = task_system["planWorkDefaultMode"].get<std::string>();
-        }
-        if (task_system.contains("maxPlanOutputTokens") && task_system["maxPlanOutputTokens"].is_number_integer()) {
+            if (task_system.contains("maxPlanOutputTokens") && task_system["maxPlanOutputTokens"].is_number_integer()) {
             config.task_system.max_plan_output_tokens = task_system["maxPlanOutputTokens"].get<int>();
         }
     }
@@ -1227,12 +1224,6 @@ Config LoadConfig(const std::filesystem::path& config_path) {
             config.task_system.max_tasks_per_plan);
     }
 
-    const auto task_system_plan_work_default_mode = GetEnvFallback(
-        "KABOT_TASK_SYSTEM_PLAN_WORK_DEFAULT_MODE",
-        "");
-    if (!task_system_plan_work_default_mode.empty()) {
-        config.task_system.plan_work_default_mode = task_system_plan_work_default_mode;
-    }
     const auto task_system_max_plan_output_tokens = GetEnvFallback(
         "KABOT_TASK_SYSTEM_MAX_PLAN_OUTPUT_TOKENS",
         "");
