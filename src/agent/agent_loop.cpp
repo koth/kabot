@@ -624,9 +624,9 @@ void AgentLoop::RegisterDefaultTools() {
         return;
     }
 
-    tools_.Register(std::make_unique<kabot::agent::tools::FileReadTool>());
-    tools_.Register(std::make_unique<kabot::agent::tools::FileWriteTool>());
-    tools_.Register(std::make_unique<kabot::agent::tools::FileEditTool>());
+    tools_.Register(std::make_unique<kabot::agent::tools::ReadFileTool>());
+    tools_.Register(std::make_unique<kabot::agent::tools::WriteFileTool>());
+    tools_.Register(std::make_unique<kabot::agent::tools::EditFileTool>());
     tools_.Register(std::make_unique<kabot::agent::tools::ListDirTool>());
     tools_.Register(std::make_unique<kabot::agent::tools::GlobTool>());
     tools_.Register(std::make_unique<kabot::agent::tools::GrepTool>());
