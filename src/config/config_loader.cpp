@@ -1229,13 +1229,13 @@ Config LoadConfig(const std::filesystem::path& config_path) {
 
     const auto task_system_plan_work_default_mode = GetEnvFallback(
         "KABOT_TASK_SYSTEM_PLAN_WORK_DEFAULT_MODE",
-        {});
+        "");
     if (!task_system_plan_work_default_mode.empty()) {
         config.task_system.plan_work_default_mode = task_system_plan_work_default_mode;
     }
     const auto task_system_max_plan_output_tokens = GetEnvFallback(
         "KABOT_TASK_SYSTEM_MAX_PLAN_OUTPUT_TOKENS",
-        {});
+        "");
     if (!task_system_max_plan_output_tokens.empty()) {
         config.task_system.max_plan_output_tokens = ParseInt(
             task_system_max_plan_output_tokens,
