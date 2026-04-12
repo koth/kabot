@@ -405,6 +405,7 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
             notify_phase(DirectExecutionPhase::kCallingTools);
             messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls, response.usage);
             session.AddMessage("assistant", response.content, response.tool_calls, response.usage);
+            bool plan_work_called = false;
             for (const auto& call : response.tool_calls) {
                 if (cancel_token.IsCancelled()) {
                     throw std::runtime_error("Task cancelled by timeout or stop request");
@@ -413,10 +414,17 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
                     message_sent = true;
                 }
                 std::string result = ExecuteToolWithGuardrails(session, call);
+                if (call.name == "plan_work") {
+                    plan_work_called = true;
+                    final_content = result;
+                }
                 messages = context_.AddToolResult(messages, call.id, call.name, result);
                 session.AddToolMessage(call.id, call.name, result);
             }
             notify_phase(DirectExecutionPhase::kProcessing);
+            if (plan_work_called) {
+                break;
+            }
         } else {
             if (requires_tool_guardrail && !tool_called && !guardrail_retry_used) {
                 guardrail_retry_used = true;
@@ -561,15 +569,23 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
             notify_phase(DirectExecutionPhase::kCallingTools);
             messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls, response.usage);
             session.AddMessage("assistant", response.content, response.tool_calls, response.usage);
+            bool plan_work_called = false;
             for (const auto& call : response.tool_calls) {
                 if (call.name == "send_message") {
                     message_sent = true;
                 }
                 std::string result = ExecuteToolWithGuardrails(session, call);
+                if (call.name == "plan_work") {
+                    plan_work_called = true;
+                    final_content = result;
+                }
                 messages = context_.AddToolResult(messages, call.id, call.name, result);
                 session.AddToolMessage(call.id, call.name, result);
             }
             notify_phase(DirectExecutionPhase::kProcessing);
+            if (plan_work_called) {
+                break;
+            }
         } else {
             if (requires_tool_guardrail && !tool_called && !guardrail_retry_used) {
                 guardrail_retry_used = true;
@@ -749,13 +765,21 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
             tool_called = true;
             messages = context_.AddAssistantMessage(messages, response.content, response.tool_calls, response.usage);
             session.AddMessage("assistant", response.content, response.tool_calls, response.usage);
+            bool plan_work_called = false;
             for (const auto& call : response.tool_calls) {
                 if (call.name == "send_message") {
                     message_sent = true;
                 }
                 std::string result = ExecuteToolWithGuardrails(session, call);
+                if (call.name == "plan_work") {
+                    plan_work_called = true;
+                    final_content = result;
+                }
                 messages = context_.AddToolResult(messages, call.id, call.name, result);
                 session.AddToolMessage(call.id, call.name, result);
+            }
+            if (plan_work_called) {
+                break;
             }
         } else {
             if (requires_tool_guardrail && !tool_called && !guardrail_retry_used) {

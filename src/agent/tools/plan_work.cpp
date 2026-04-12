@@ -85,15 +85,24 @@ std::string PlanWorkTool::Execute(const std::unordered_map<std::string, std::str
     }
 
     std::string project_description;
-    bool project_query_failed = false;
+    std::string context_note;
     if (!project_id.empty() && relay_manager_) {
         auto query_result = relay_manager_->QueryProject(project_id);
         if (query_result.success) {
             project_description = query_result.info.description;
+            if (project_description.empty()) {
+                context_note = "Note: project found on relay server but has no description. Decomposing based on instruction only.\n\n";
+            } else {
+                context_note = "Project context loaded.\n\n";
+            }
         } else {
-            project_query_failed = true;
+            context_note = "Note: could not fetch project description from relay server (" +
+                           (query_result.message.empty() ? std::to_string(query_result.http_status) : query_result.message) +
+                           "). Decomposing based on instruction only.\n\n";
             LOG_WARN("[plan_work] failed to query project {}: {}", project_id, query_result.message);
         }
+    } else if (!project_id.empty()) {
+        context_note = "Note: relay manager not available. Skipping project context lookup.\n\n";
     }
 
     kabot::agent::planning::TaskDecomposer decomposer(provider_, task_config_.max_tasks_per_plan);
@@ -105,8 +114,8 @@ std::string PlanWorkTool::Execute(const std::unordered_map<std::string, std::str
 
     if (mode == "plan_only") {
         std::ostringstream oss;
-        if (project_query_failed) {
-            oss << "Note: could not fetch project description from relay server. Decomposing based on instruction only.\n\n";
+        if (!context_note.empty()) {
+            oss << context_note;
         }
         oss << "Task plan created (" << plan.tasks.size() << " tasks):\n";
         for (std::size_t i = 0; i < plan.tasks.size(); ++i) {
@@ -126,8 +135,8 @@ std::string PlanWorkTool::Execute(const std::unordered_map<std::string, std::str
     std::size_t success_count = 0;
     std::size_t failure_count = 0;
     std::ostringstream summary;
-    if (project_query_failed) {
-        summary << "Note: could not fetch project description from relay server. Decomposing based on instruction only.\n\n";
+    if (!context_note.empty()) {
+        summary << context_note;
     }
     summary << "Submitted tasks:\n";
 
