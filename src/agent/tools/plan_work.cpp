@@ -45,7 +45,7 @@ std::string PlanWorkTool::ParametersJson() const {
             },
             "project_context": {
                 "type": "object",
-                "description": "Optional project metadata such as project_id, merge_request, etc."
+                "description": "Optional project metadata. If project_id is provided, the tool will attempt to fetch project description from the relay server before decomposition."
             }
         },
         "required": ["instruction"]
@@ -84,15 +84,20 @@ std::string PlanWorkTool::Execute(const std::unordered_map<std::string, std::str
         }
     }
 
-    // Fall back to session context if not explicitly provided
-    if (project_id.empty() && !channel_.empty()) {
-        // We don't have a direct project_id from session, but we can use a placeholder
-        // based on the interaction context if nothing else is provided.
-        // In practice, project_id should come from project_context or a relay task.
+    std::string project_description;
+    bool project_query_failed = false;
+    if (!project_id.empty() && relay_manager_) {
+        auto query_result = relay_manager_->QueryProject(project_id);
+        if (query_result.success) {
+            project_description = query_result.info.description;
+        } else {
+            project_query_failed = true;
+            LOG_WARN("[plan_work] failed to query project {}: {}", project_id, query_result.message);
+        }
     }
 
     kabot::agent::planning::TaskDecomposer decomposer(provider_, task_config_.max_tasks_per_plan);
-    auto plan = decomposer.Decompose(it_instruction->second, project_id, merge_request);
+    auto plan = decomposer.Decompose(it_instruction->second, project_id, merge_request, project_description);
 
     if (!plan.success) {
         return std::string("Error: ") + plan.error;
@@ -100,6 +105,9 @@ std::string PlanWorkTool::Execute(const std::unordered_map<std::string, std::str
 
     if (mode == "plan_only") {
         std::ostringstream oss;
+        if (project_query_failed) {
+            oss << "Note: could not fetch project description from relay server. Decomposing based on instruction only.\n\n";
+        }
         oss << "Task plan created (" << plan.tasks.size() << " tasks):\n";
         for (std::size_t i = 0; i < plan.tasks.size(); ++i) {
             oss << (i + 1) << ". " << plan.tasks[i].title;
@@ -118,6 +126,9 @@ std::string PlanWorkTool::Execute(const std::unordered_map<std::string, std::str
     std::size_t success_count = 0;
     std::size_t failure_count = 0;
     std::ostringstream summary;
+    if (project_query_failed) {
+        summary << "Note: could not fetch project description from relay server. Decomposing based on instruction only.\n\n";
+    }
     summary << "Submitted tasks:\n";
 
     for (const auto& task : plan.tasks) {

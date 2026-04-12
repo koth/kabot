@@ -97,6 +97,20 @@ struct RelayTaskSubmissionResult {
     std::string task_id;
 };
 
+struct RelayProjectInfo {
+    std::string project_id;
+    std::string name;
+    std::string description;
+    std::unordered_map<std::string, std::string> metadata;
+};
+
+struct RelayProjectQueryResult {
+    bool success = false;
+    int http_status = 0;
+    std::string message;
+    RelayProjectInfo info;
+};
+
 class RelayManager {
 public:
     RelayManager(const kabot::config::Config& config,
@@ -118,7 +132,8 @@ public:
                                                 const std::string& content,
                                                 const std::string& reported_at = {});
     RelayTaskSubmissionResult SubmitProjectTask(const std::string& project_id,
-                                                const RelayTaskCreate& task);
+                                                 const RelayTaskCreate& task);
+    RelayProjectQueryResult QueryProject(const std::string& project_id);
 
 private:
     class Worker;

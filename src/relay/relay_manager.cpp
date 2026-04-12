@@ -95,6 +95,21 @@ std::string BuildProjectTaskSubmissionTarget(const std::string& project_id) {
     return "/api/projects/" + UrlEncode(project_id) + "/tasks";
 }
 
+std::string BuildProjectQueryTarget(const std::string& project_id) {
+    return "/api/projects/" + UrlEncode(project_id);
+}
+
+http::request<http::string_body> BuildProjectQueryRequest(
+    const kabot::config::RelayManagedAgentConfig& config,
+    const std::string& project_id) {
+    http::request<http::string_body> request{http::verb::get, BuildProjectQueryTarget(project_id), 11};
+    request.set(http::field::host, config.host);
+    request.set(http::field::user_agent, "kabot-relay/1.0");
+    request.set(http::field::authorization, "Bearer " + config.token);
+    request.prepare_payload();
+    return request;
+}
+
 http::request<http::string_body> BuildSubmitTaskRequest(
     const kabot::config::RelayManagedAgentConfig& config,
     const std::string& project_id,
@@ -1229,7 +1244,7 @@ DailySummaryUploadResult RelayManager::UploadDailySummary(const std::string& loc
 }
 
 RelayTaskSubmissionResult RelayManager::SubmitProjectTask(const std::string& project_id,
-                                                          const RelayTaskCreate& task) {
+                                                           const RelayTaskCreate& task) {
     if (workers_.empty()) {
         return {false, 0, "no relay workers available", {}};
     }
@@ -1262,6 +1277,54 @@ RelayTaskSubmissionResult RelayManager::SubmitProjectTask(const std::string& pro
         return {false, 0, ex.what(), {}};
     } catch (...) {
         return {false, 0, "unknown task submission error", {}};
+    }
+}
+
+RelayProjectQueryResult RelayManager::QueryProject(const std::string& project_id) {
+    if (workers_.empty()) {
+        return {false, 0, "no relay workers available", {}};
+    }
+    if (project_id.empty()) {
+        return {false, 0, "project_id is required for project query", {}};
+    }
+    try {
+        const auto& worker = workers_.front();
+        const auto request = BuildProjectQueryRequest(worker->Config(), project_id);
+        const auto response = worker->DoHttpRequest(request);
+        const bool success = response.result_int() >= 200 && response.result_int() < 300;
+        if (!success) {
+            std::string message = !response.body().empty()
+                ? response.body()
+                : std::string(response.reason());
+            return {false, static_cast<int>(response.result_int()), message, {}};
+        }
+        auto json = Json::parse(response.body(), nullptr, false);
+        if (!json.is_object()) {
+            return {false, static_cast<int>(response.result_int()), "invalid JSON response", {}};
+        }
+        RelayProjectInfo info;
+        info.project_id = project_id;
+        if (json.contains("projectId") && json["projectId"].is_string()) {
+            info.project_id = json["projectId"].get<std::string>();
+        }
+        if (json.contains("name") && json["name"].is_string()) {
+            info.name = json["name"].get<std::string>();
+        }
+        if (json.contains("description") && json["description"].is_string()) {
+            info.description = json["description"].get<std::string>();
+        }
+        if (json.contains("metadata") && json["metadata"].is_object()) {
+            for (const auto& [k, v] : json["metadata"].items()) {
+                if (v.is_string()) {
+                    info.metadata[k] = v.get<std::string>();
+                }
+            }
+        }
+        return {true, static_cast<int>(response.result_int()), {}, info};
+    } catch (const std::exception& ex) {
+        return {false, 0, ex.what(), {}};
+    } catch (...) {
+        return {false, 0, "unknown project query error", {}};
     }
 }
 

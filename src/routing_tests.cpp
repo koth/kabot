@@ -7,11 +7,14 @@
 #include "task/task_runtime.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include "httplib.h"
 #include "nlohmann/json.hpp"
 #include "utils/cancel_token.hpp"
 
@@ -589,6 +592,66 @@ void TestPlanWorkToolDefaultModeFallback() {
            "expected plan_only fallback to produce a preview");
 }
 
+void TestPlanWorkToolFallbackWithoutRelayManager() {
+    PlanWorkStubProvider provider;
+    kabot::config::TaskSystemConfig task_config;
+    task_config.max_tasks_per_plan = 5;
+
+    kabot::agent::tools::PlanWorkTool tool(provider, task_config, nullptr);
+    std::unordered_map<std::string, std::string> params;
+    params["instruction"] = "Build a todo app";
+    params["mode"] = "plan_only";
+    params["project_context"] = R"({"project_id":"proj-42"})";
+
+    auto result = tool.Execute(params);
+    // Without a relay manager, it should still decompose (no crash) but won't fetch project description.
+    Expect(result.find("Task plan created") != std::string::npos,
+           "expected plan preview when relay manager is null");
+    Expect(result.find("Note: could not fetch") == std::string::npos,
+           "expected no fetch-failure note when relay manager is simply absent");
+}
+
+void TestRelayManagerQueryProject() {
+    httplib::Server server;
+    server.Get("/api/projects/proj-success", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content(
+            R"({"projectId":"proj-success","name":"Success Project","description":"A successful project"})",
+            "application/json");
+    });
+    server.Get("/api/projects/proj-fail", [](const httplib::Request&, httplib::Response& res) {
+        res.status = 404;
+        res.set_content("project not found", "text/plain");
+    });
+
+    std::thread server_thread([&server]() {
+        server.listen("127.0.0.1", 18888);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    kabot::bus::MessageBus bus;
+    StubProvider provider;
+    auto config = BuildTaskRuntimeConfig();
+    config.relay.managed_agents[0].host = "127.0.0.1";
+    config.relay.managed_agents[0].port = 18888;
+    config.relay.managed_agents[0].scheme = "http";
+    config.relay.managed_agents[0].use_tls = false;
+
+    kabot::agent::AgentRegistry registry(bus, provider, config, nullptr);
+    kabot::relay::RelayManager relay(config, registry);
+
+    const auto success = relay.QueryProject("proj-success");
+    Expect(success.success, "expected QueryProject to succeed");
+    Expect(success.info.description == "A successful project",
+           "expected project description to match");
+
+    const auto fail = relay.QueryProject("proj-fail");
+    Expect(!fail.success, "expected QueryProject to fail for nonexistent project");
+    Expect(fail.http_status == 404, "expected 404 status");
+
+    server.stop();
+    server_thread.join();
+}
+
 }  // namespace
 
 int main() {
@@ -611,6 +674,8 @@ int main() {
     TestPlanWorkToolPlanAndSubmitRequiresRelayManager();
     TestPlanWorkToolProjectContextIsInherited();
     TestPlanWorkToolDefaultModeFallback();
+    TestPlanWorkToolFallbackWithoutRelayManager();
+    TestRelayManagerQueryProject();
     std::cout << "routing_tests passed" << std::endl;
     return 0;
 }

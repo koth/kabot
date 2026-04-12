@@ -15,29 +15,32 @@ TaskDecomposer::TaskDecomposer(kabot::providers::LLMProvider& provider,
     : provider_(provider)
     , max_tasks_per_plan_(max_tasks_per_plan) {}
 
-std::string TaskDecomposer::BuildSystemPrompt() {
-    return R"(You are a project planning assistant. Given a user's instruction, decompose it into a structured list of tasks.
-
-Return ONLY a JSON object with this exact structure:
-{
-  "tasks": [
-    {
-      "title": "Short task title",
-      "instruction": "Detailed step-by-step instructions for the task",
-      "priority": "normal",
-      "depends_on": ["title_of_prerequisite_task_1", "title_of_prerequisite_task_2"],
-      "estimated_effort": "2 hours"
+std::string TaskDecomposer::BuildSystemPrompt(const std::string& project_description) {
+    std::string prompt = "You are a project planning assistant. Given a user's instruction, decompose it into a structured list of tasks.\n";
+    if (!project_description.empty()) {
+        prompt += "\nProject context:\n" + project_description + "\n";
     }
-  ]
-}
-
-Rules:
-- Each task must have a non-empty "title" and "instruction".
-- "priority" can be "low", "normal", "high", or "urgent".
-- "depends_on" is optional and contains titles of other tasks in the same list that must be completed first.
-- Do not create cyclic dependencies.
-- Keep the total number of tasks reasonable (preferably under 20).
-)";
+    prompt += "\n"
+        "Return ONLY a JSON object with this exact structure:\n"
+        "{\n"
+        "  \"tasks\": [\n"
+        "    {\n"
+        "      \"title\": \"Short task title\",\n"
+        "      \"instruction\": \"Detailed step-by-step instructions for the task\",\n"
+        "      \"priority\": \"normal\",\n"
+        "      \"depends_on\": [\"title_of_prerequisite_task_1\", \"title_of_prerequisite_task_2\"],\n"
+        "      \"estimated_effort\": \"2 hours\"\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "\n"
+        "Rules:\n"
+        "- Each task must have a non-empty \"title\" and \"instruction\".\n"
+        "- \"priority\" can be \"low\", \"normal\", \"high\", or \"urgent\".\n"
+        "- \"depends_on\" is optional and contains titles of other tasks in the same list that must be completed first.\n"
+        "- Do not create cyclic dependencies.\n"
+        "- Keep the total number of tasks reasonable (preferably under 20).\n";
+    return prompt;
 }
 
 bool TaskDecomposer::ValidateResponse(const nlohmann::json& json,
@@ -159,14 +162,15 @@ std::vector<PlannedTask> TaskDecomposer::TopoSort(std::vector<PlannedTask> tasks
 
 TaskPlan TaskDecomposer::Decompose(const std::string& instruction,
                                    const std::string& project_id,
-                                   const std::string& merge_request) const {
+                                   const std::string& merge_request,
+                                   const std::string& project_description) const {
     TaskPlan plan;
     plan.project_id = project_id;
     plan.merge_request = merge_request;
 
     try {
         std::vector<kabot::providers::Message> messages;
-        messages.push_back({"system", BuildSystemPrompt(), {}, {}, {}, {}, {}, false});
+        messages.push_back({"system", BuildSystemPrompt(project_description), {}, {}, {}, {}, {}, false});
         messages.push_back({"user", instruction, {}, {}, {}, {}, {}, false});
 
         auto response = provider_.Chat(

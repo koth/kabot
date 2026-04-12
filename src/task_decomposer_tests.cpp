@@ -94,6 +94,18 @@ void TestTopoSortOrdersDependenciesFirst() {
     Expect(sorted[2].title == "C", "expected C third");
 }
 
+void TestSystemPromptIncludesProjectDescription() {
+    const auto prompt = kabot::agent::planning::TaskDecomposer::BuildSystemPrompt("A futuristic todo app for cats.");
+    Expect(prompt.find("A futuristic todo app for cats.") != std::string::npos,
+           "expected prompt to contain project description");
+}
+
+void TestSystemPromptOmitsProjectDescriptionWhenEmpty() {
+    const auto prompt = kabot::agent::planning::TaskDecomposer::BuildSystemPrompt("");
+    Expect(prompt.find("Project context:") == std::string::npos,
+           "expected prompt not to contain project context section when description is empty");
+}
+
 }  // namespace
 
 int main() {
@@ -104,6 +116,8 @@ int main() {
     TestDetectCycleFindsNoneOnAcyclicGraph();
     TestDetectCycleFindsCycle();
     TestTopoSortOrdersDependenciesFirst();
+    TestSystemPromptIncludesProjectDescription();
+    TestSystemPromptOmitsProjectDescriptionWhenEmpty();
     std::cout << "task_decomposer_tests passed" << std::endl;
     return 0;
 }
