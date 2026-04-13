@@ -52,6 +52,7 @@ struct ProviderSettings {
     std::string api_base;
     std::string model;
     bool use_proxy_for_llm = false;
+    std::string user_agent = "claude-code/0.2.1";
 };
 
 class LLMProvider {

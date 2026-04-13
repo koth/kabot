@@ -159,10 +159,12 @@ std::unordered_map<std::string, std::string> ParseArguments(const nlohmann::json
 LiteLLMProvider::LiteLLMProvider(std::string api_key,
                                  std::string api_base,
                                  std::string default_model,
-                                 bool use_proxy_for_llm)
+                                 bool use_proxy_for_llm,
+                                 std::string user_agent)
     : api_key_(std::move(api_key))
     , api_base_(std::move(api_base))
     , default_model_(std::move(default_model))
+    , user_agent_(std::move(user_agent))
     , use_proxy_for_llm_(use_proxy_for_llm) {
     is_openrouter_ = (!api_key_.empty() && api_key_.rfind("sk-or-", 0) == 0) ||
         (api_base_.find("openrouter") != std::string::npos);
@@ -393,7 +395,7 @@ LLMResponse LiteLLMProvider::Chat(
                  (use_anthropic ? "anthropic" : "openai"));
 
         httplib::Headers headers{{"Content-Type", "application/json"}};
-        headers.emplace("User-Agent", "claude-code/0.2.0");
+        headers.emplace("User-Agent", user_agent_);
         if (!api_key_.empty()) {
             if (use_anthropic) {
                 headers.emplace("x-api-key", api_key_);

@@ -652,6 +652,9 @@ void ApplyConfigFromJson(Config& config, const nlohmann::json& data) {
         if (providers.contains("useProxyForLLM") && providers["useProxyForLLM"].is_boolean()) {
             config.providers.use_proxy_for_llm = providers["useProxyForLLM"].get<bool>();
         }
+        if (providers.contains("userAgent") && providers["userAgent"].is_string()) {
+            config.providers.user_agent = providers["userAgent"].get<std::string>();
+        }
         if (providers.contains("anthropic")) {
             ApplyProviderConfig(config.providers.anthropic, providers["anthropic"]);
         }
@@ -936,6 +939,13 @@ Config LoadConfig(const std::filesystem::path& config_path) {
         "KABOT_PROVIDERS_USE_PROXY_FOR_LLM");
     if (!use_proxy_for_llm.empty()) {
         config.providers.use_proxy_for_llm = ParseBool(use_proxy_for_llm);
+    }
+
+    const auto user_agent = GetEnvFallback(
+        "KABOT_PROVIDERS__USER_AGENT",
+        "KABOT_PROVIDERS_USER_AGENT");
+    if (!user_agent.empty()) {
+        config.providers.user_agent = user_agent;
     }
 
     const auto anthropic_key = GetEnvFallback(

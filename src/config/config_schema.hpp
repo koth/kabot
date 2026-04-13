@@ -92,6 +92,7 @@ struct ProvidersConfig {
     ProviderConfig vllm;
     ProviderConfig gemini;
     bool use_proxy_for_llm = false;
+    std::string user_agent = "claude-code/0.2.1";
 };
 
 struct AgentDefaults {

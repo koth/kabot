@@ -13,7 +13,8 @@ public:
     LiteLLMProvider(std::string api_key,
                     std::string api_base,
                     std::string default_model,
-                    bool use_proxy_for_llm);
+                    bool use_proxy_for_llm,
+                    std::string user_agent);
 
     LLMResponse Chat(
         const std::vector<Message>& messages,
@@ -28,6 +29,7 @@ private:
     std::string api_key_;
     std::string api_base_;
     std::string default_model_;
+    std::string user_agent_;
     bool is_openrouter_ = false;
     bool is_vllm_ = false;
     bool use_proxy_for_llm_ = false;

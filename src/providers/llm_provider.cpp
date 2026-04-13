@@ -10,6 +10,7 @@ ProviderSettings ResolveProviderSettings(const kabot::config::Config& config) {
         ? "anthropic/claude-opus-4-5"
         : config.agents.defaults.model;
     settings.use_proxy_for_llm = config.providers.use_proxy_for_llm;
+    settings.user_agent = config.providers.user_agent;
 
     if (!config.providers.openrouter.api_key.empty()) {
         settings.api_key = config.providers.openrouter.api_key;
@@ -63,7 +64,8 @@ std::unique_ptr<LLMProvider> CreateProvider(const kabot::config::Config& config)
         settings.api_key,
         settings.api_base,
         settings.model,
-        settings.use_proxy_for_llm);
+        settings.use_proxy_for_llm,
+        settings.user_agent);
 }
 
 }  // namespace kabot::providers
