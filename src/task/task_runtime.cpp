@@ -142,9 +142,11 @@ void TaskRuntime::Start() {
     const auto pool_size = std::max(1, config_.task_system.max_concurrent_tasks);
     task_pool_ = std::make_unique<kabot::ThreadPool>(static_cast<std::size_t>(pool_size));
     EnsureDailySummaryJobs();
-    for (const auto& local_agent : relay_.AutoClaimLocalAgents()) {
+    const auto auto_claim_agents = relay_.AutoClaimLocalAgents();
+    for (const auto& local_agent : auto_claim_agents) {
         poll_threads_.emplace_back([this, local_agent] { AgentPollLoop(local_agent); });
     }
+    LOG_INFO("[task] task system started, auto-claim agents={}", auto_claim_agents.size());
 }
 
 void TaskRuntime::Stop() {
@@ -251,6 +253,9 @@ void TaskRuntime::AgentPollLoop(const std::string& local_agent) {
                         ExecuteClaimedTask(local_agent, task);
                     });
                 }
+            } else if (!claim.success) {
+                LOG_WARN("[task] claim next task failed for local_agent={} http_status={} message={}",
+                         local_agent, claim.http_status, claim.message);
             }
         }
         std::this_thread::sleep_for(std::chrono::seconds(poll_interval));
