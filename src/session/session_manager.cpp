@@ -135,6 +135,26 @@ bool Session::HasReadFile(const std::string& path) const {
     return read_file_paths_.find(path) != read_file_paths_.end();
 }
 
+void Session::AddPendingNotification(const std::string& notification) {
+    if (!metadata_.contains("pending_notifications")) {
+        metadata_["pending_notifications"] = nlohmann::json::array();
+    }
+    metadata_["pending_notifications"].push_back(notification);
+}
+
+std::vector<std::string> Session::TakePendingNotifications() {
+    std::vector<std::string> result;
+    if (metadata_.contains("pending_notifications") && metadata_["pending_notifications"].is_array()) {
+        for (const auto& item : metadata_["pending_notifications"]) {
+            if (item.is_string()) {
+                result.push_back(item.get<std::string>());
+            }
+        }
+        metadata_.erase("pending_notifications");
+    }
+    return result;
+}
+
 std::vector<kabot::providers::Message> Session::GetHistory(std::size_t max_messages) const {
     std::vector<kabot::providers::Message> history;
     if (messages_.empty()) {
@@ -154,10 +174,8 @@ std::vector<kabot::providers::Message> Session::GetHistory(std::size_t max_messa
         }
     }
 
-    if (start > 0) {
-        while (start < messages_.size() && messages_[start].role != "user") {
-            start += 1;
-        }
+    while (start < messages_.size() && messages_[start].role != "user") {
+        start += 1;
     }
 
     if (start >= messages_.size()) {

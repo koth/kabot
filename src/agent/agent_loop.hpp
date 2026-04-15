@@ -63,7 +63,8 @@ public:
                               const DirectOutboundObserver& outbound_observer = {},
                               const kabot::CancelToken& cancel_token = {});
     std::vector<std::string> RegisteredTools() const;
-    std::string SpawnSubagent(const kabot::subagent::AgentSpawnInput& input);
+    std::string SpawnSubagent(const kabot::subagent::AgentSpawnInput& input,
+                              const std::string& session_key = "");
 
 private:
     kabot::bus::MessageBus& bus_;

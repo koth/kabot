@@ -18,8 +18,11 @@ public:
     std::string ParametersJson() const override;
     std::string Execute(const std::unordered_map<std::string, std::string>& params) override;
 
+    void SetSessionKey(const std::string& session_key) { session_key_ = session_key; }
+
 private:
     Spawner spawner_;
+    std::string session_key_;
 };
 
 }  // namespace kabot::agent::tools

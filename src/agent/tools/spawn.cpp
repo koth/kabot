@@ -55,6 +55,9 @@ std::string AgentTool::Execute(const std::unordered_map<std::string, std::string
     if (auto iso = params.find("isolation"); iso != params.end()) {
         input.isolation = iso->second;
     }
+    if (!session_key_.empty()) {
+        input.session_key = session_key_;
+    }
 
     try {
         return spawner_(input);

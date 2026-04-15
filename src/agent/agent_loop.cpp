@@ -237,6 +237,13 @@ void AppendGuardrailUserMessage(std::vector<kabot::providers::Message>& messages
     messages.push_back(std::move(reminder));
 }
 
+void AppendPostToolReminder(std::vector<kabot::providers::Message>& messages) {
+    kabot::providers::Message reminder{};
+    reminder.role = "user";
+    reminder.content = "你刚刚执行了工具调用并收到了结果。请基于这些结果给出一个清晰、完整的回复，不要留空。";
+    messages.push_back(std::move(reminder));
+}
+
 }  // namespace
 
 std::string DirectExecutionPhaseSummary(DirectExecutionPhase phase) {
@@ -263,6 +270,30 @@ AgentLoop::AgentLoop(
     , cron_(cron) {
     subagent_service_ = std::make_unique<kabot::subagent::SubagentService>(
         provider_, tools_, workspace_, static_cast<kabot::config::AgentDefaults>(config_));
+    subagent_service_->SetTaskCompletionHandler([this](const kabot::subagent::AgentTaskRecord& task) {
+        if (task.parent_session_id.empty()) return;
+        auto session_opt = sessions_.Get(task.parent_session_id);
+        if (!session_opt) return;
+        auto session = *session_opt;
+        std::string status_str = "completed";
+        if (task.status == kabot::subagent::SubagentStatus::kFailed) {
+            status_str = "failed";
+        } else if (task.status == kabot::subagent::SubagentStatus::kAborted) {
+            status_str = "killed";
+        }
+        std::ostringstream oss;
+        oss << "<task-notification agent_id=\"" << task.agent_id << "\" status=\"" << status_str << "\">\n";
+        oss << "Task: " << task.description << "\n";
+        if (task.status == kabot::subagent::SubagentStatus::kCompleted) {
+            oss << "Summary: " << task.output_file << "\n";
+            oss << "total_tokens: " << task.total_tokens << "\n";
+        } else {
+            oss << "Error: " << task.error.code << " - " << task.error.message << "\n";
+        }
+        oss << "</task-notification>";
+        session.AddPendingNotification(oss.str());
+        sessions_.Save(session);
+    });
     RegisterDefaultTools();
 }
 
@@ -356,6 +387,12 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
     auto session = sessions_.GetOrCreate(session_key);
     auto history = session.GetHistory(static_cast<std::size_t>(config_.max_history_messages));
     auto messages = context_.BuildMessages(history, content, {});
+    for (const auto& notif : session.TakePendingNotifications()) {
+        kabot::providers::Message notif_msg;
+        notif_msg.role = "user";
+        notif_msg.content = notif;
+        messages.push_back(std::move(notif_msg));
+    }
     DirectExecutionPhase last_phase = DirectExecutionPhase::kReceived;
     const auto notify_phase = [&](DirectExecutionPhase phase) {
         if (!observer) {
@@ -375,6 +412,7 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
     const bool requires_tool_guardrail = RequiresToolGuardrail(content);
     bool tool_called = false;
     bool guardrail_retry_used = false;
+    bool post_tool_reminder_used = false;
 
     LOG_INFO("[agent] process_direct tool_guardrail={} session={}",
              (requires_tool_guardrail ? "true" : "false"),
@@ -433,6 +471,12 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
                          response.finish_reason,
                          session_key);
                 AppendGuardrailUserMessage(messages, content);
+                continue;
+            }
+            if (tool_called && Trim(response.content).empty() && !post_tool_reminder_used) {
+                post_tool_reminder_used = true;
+                LOG_WARN("[agent] process_direct empty post-tool response, appending reminder session={}", session_key);
+                AppendPostToolReminder(messages);
                 continue;
             }
             notify_phase(DirectExecutionPhase::kReplying);
@@ -523,6 +567,12 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
         history,
         content,
         msg.media);
+    for (const auto& notif : session.TakePendingNotifications()) {
+        kabot::providers::Message notif_msg;
+        notif_msg.role = "user";
+        notif_msg.content = notif;
+        messages.push_back(std::move(notif_msg));
+    }
 
     int iteration = 0;
     std::string final_content;
@@ -531,6 +581,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
     const bool requires_tool_guardrail = RequiresToolGuardrail(content);
     bool tool_called = false;
     bool guardrail_retry_used = false;
+    bool post_tool_reminder_used = false;
 
     LOG_INFO("[agent] process_message tool_guardrail={} session={}",
              (requires_tool_guardrail ? "true" : "false"),
@@ -594,7 +645,12 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
                          response.finish_reason,
                          msg.SessionKey());
                 AppendGuardrailUserMessage(messages, content);
-                send_typing();
+                continue;
+            }
+            if (tool_called && Trim(response.content).empty() && !post_tool_reminder_used) {
+                post_tool_reminder_used = true;
+                LOG_WARN("[agent] process_message empty post-tool response, appending reminder session={}", msg.SessionKey());
+                AppendPostToolReminder(messages);
                 continue;
             }
             notify_phase(DirectExecutionPhase::kReplying);
@@ -735,6 +791,12 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
     const auto session_key = origin_channel + ":" + origin_chat_id;
     auto session = sessions_.GetOrCreate(session_key);
     auto messages = context_.BuildMessages(session.GetHistory(), msg.content, {});
+    for (const auto& notif : session.TakePendingNotifications()) {
+        kabot::providers::Message notif_msg;
+        notif_msg.role = "user";
+        notif_msg.content = notif;
+        messages.push_back(std::move(notif_msg));
+    }
 
     int iteration = 0;
     std::string final_content;
@@ -743,6 +805,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
     const bool requires_tool_guardrail = RequiresToolGuardrail(msg.content);
     bool tool_called = false;
     bool guardrail_retry_used = false;
+    bool post_tool_reminder_used = false;
 
     LOG_INFO("[agent] process_system_message tool_guardrail={} session={}",
              (requires_tool_guardrail ? "true" : "false"),
@@ -791,6 +854,12 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
                 AppendGuardrailUserMessage(messages, msg.content);
                 continue;
             }
+            if (tool_called && Trim(response.content).empty() && !post_tool_reminder_used) {
+                post_tool_reminder_used = true;
+                LOG_WARN("[agent] process_system_message empty post-tool response, appending reminder session={}", session_key);
+                AppendPostToolReminder(messages);
+                continue;
+            }
             final_content = response.content;
             break;
         }
@@ -823,7 +892,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
 }
 
 std::string AgentLoop::ExecuteToolWithGuardrails(kabot::session::Session& session,
-                                                    const kabot::providers::ToolCallRequest& call) {
+                                                     const kabot::providers::ToolCallRequest& call) {
     if (call.name == "file_edit") {
         auto path_it = call.arguments.find("path");
         if (path_it == call.arguments.end() || path_it->second.empty()) {
@@ -833,6 +902,12 @@ std::string AgentLoop::ExecuteToolWithGuardrails(kabot::session::Session& sessio
             LOG_WARN("[agent] file_edit blocked: {} was not read before editing session={}",
                      path_it->second, session.Key());
             return "Error: file must be read using read_file before editing with file_edit. Path: " + path_it->second;
+        }
+    }
+
+    if (call.name == "agent") {
+        if (auto* agent_tool = dynamic_cast<kabot::agent::tools::AgentTool*>(tools_.Get("agent"))) {
+            agent_tool->SetSessionKey(session.Key());
         }
     }
 
@@ -850,20 +925,32 @@ std::string AgentLoop::ExecuteToolWithGuardrails(kabot::session::Session& sessio
     return result;
 }
 
-std::string AgentLoop::SpawnSubagent(const kabot::subagent::AgentSpawnInput& input) {
+std::string AgentLoop::SpawnSubagent(const kabot::subagent::AgentSpawnInput& input,
+                                      const std::string& session_key) {
     if (!subagent_service_) {
         throw std::runtime_error("subagent service not initialized");
     }
 
     kabot::subagent::SubagentContext parent_ctx;
     parent_ctx.agent_id = "main";
-    parent_ctx.parent_session_id = "";
+    parent_ctx.parent_session_id = session_key.empty() ? input.session_key : session_key;
 
     auto result = subagent_service_->Spawn(input, parent_ctx);
     if (result.type == "async_launched") {
         return "Spawned subagent " + result.agent_id + " as background task " + result.task_id;
     }
-    return result.result;
+
+    std::ostringstream oss;
+    oss << result.result << "\n\n";
+    oss << "[Subagent Metadata]\n";
+    oss << "agent_id: " << result.agent_id << "\n";
+    oss << "total_tokens: " << result.total_tokens << "\n";
+    oss << "tool_calls_count: " << result.tool_calls_count << "\n";
+    oss << "duration_ms: " << result.duration_ms << "\n";
+    if (!result.worktree_path.empty()) {
+        oss << "worktree_path: " << result.worktree_path << "\n";
+    }
+    return oss.str();
 }
 
 }  // namespace kabot::agent

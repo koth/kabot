@@ -218,48 +218,38 @@ std::vector<kabot::providers::Message> ContextBuilder::ProjectMessages(
             [](const auto& m) { return m.is_virtual; }),
         messages.end());
 
-    // 2. Collect all tool_use ids from assistant messages and all tool_result ids
-    std::unordered_set<std::string> pending_tool_use_ids;
-    std::unordered_set<std::string> seen_tool_result_ids;
-    for (const auto& msg : messages) {
-        if (msg.role == "assistant") {
-            for (const auto& call : msg.tool_calls) {
-                pending_tool_use_ids.insert(call.id);
+    // 2. Determine protected tail: keep the most recent 2 complete turns + current input.
+    //    A "turn" starts at a user message. We walk backwards and count user messages.
+    std::size_t protected_start = 0;
+    int users_seen = 0;
+    for (std::size_t i = messages.size(); i-- > 0;) {
+        if (messages[i].role == "user") {
+            users_seen++;
+            if (users_seen >= 3) {
+                protected_start = i;
+                break;
             }
         }
-        if (msg.role == "tool" && !msg.tool_call_id.empty()) {
-            seen_tool_result_ids.insert(msg.tool_call_id);
+    }
+    // For short conversations (fewer than 3 users), fall back to protecting the most
+    // recent assistant and everything after it, so we still truncate oversized old content.
+    if (users_seen < 3) {
+        protected_start = messages.size();
+        for (std::size_t i = messages.size(); i-- > 0;) {
+            if (messages[i].role == "assistant") {
+                protected_start = i;
+                break;
+            }
         }
     }
 
-    // 3. Append placeholder tool_results for any missing tool_use
-    for (const auto& id : pending_tool_use_ids) {
-        if (seen_tool_result_ids.find(id) == seen_tool_result_ids.end()) {
-            kabot::providers::Message placeholder{};
-            placeholder.role = "tool";
-            placeholder.tool_call_id = id;
-            placeholder.name = "unknown";
-            placeholder.content = "[Tool result missing due to internal error]";
-            messages.push_back(std::move(placeholder));
-        }
-    }
-
-    // 4. Determine protected tail: keep the most recent assistant + everything after it intact
-    std::size_t protected_start = messages.size();
-    for (std::size_t i = messages.size(); i-- > 0;) {
-        if (messages[i].role == "assistant") {
-            protected_start = i;
-            break;
-        }
-    }
-
-    // 5. Strip oversized tool results and multimedia placeholders (only outside protected tail)
-    for (std::size_t idx = 0; idx < messages.size(); ++idx) {
+    // 3. Strip oversized tool results and multimedia placeholders outside the protected tail.
+    for (std::size_t idx = 0; idx < messages.size() && idx < protected_start; ++idx) {
         auto& msg = messages[idx];
-        if (msg.role == "tool" && msg.content.size() > kToolResultMaxChars && idx < protected_start) {
+        if (msg.role == "tool" && msg.content.size() > kToolResultMaxChars) {
             msg.content = TruncateContent(msg.content, kToolResultMaxChars);
         }
-        if (idx < protected_start && !msg.content_parts.empty()) {
+        if (!msg.content_parts.empty()) {
             bool has_media = false;
             for (const auto& part : msg.content_parts) {
                 if (part.type == "image_url") {
@@ -284,7 +274,42 @@ std::vector<kabot::providers::Message> ContextBuilder::ProjectMessages(
         }
     }
 
-    // 5. Coalesce stray system-reminder text blocks into adjacent tool messages
+    // 4. Snip: physically drop old messages outside the protected tail,
+    //    but keep system messages at the head.
+    std::vector<kabot::providers::Message> snipped;
+    snipped.reserve(messages.size());
+    for (std::size_t idx = 0; idx < messages.size(); ++idx) {
+        if (messages[idx].role == "system" || idx >= protected_start) {
+            snipped.push_back(std::move(messages[idx]));
+        }
+    }
+    messages = std::move(snipped);
+
+    // 5. Force pair tool_use/tool_result blocks.
+    std::unordered_set<std::string> pending_tool_use_ids;
+    std::unordered_set<std::string> seen_tool_result_ids;
+    for (const auto& msg : messages) {
+        if (msg.role == "assistant") {
+            for (const auto& call : msg.tool_calls) {
+                pending_tool_use_ids.insert(call.id);
+            }
+        }
+        if (msg.role == "tool" && !msg.tool_call_id.empty()) {
+            seen_tool_result_ids.insert(msg.tool_call_id);
+        }
+    }
+    for (const auto& id : pending_tool_use_ids) {
+        if (seen_tool_result_ids.find(id) == seen_tool_result_ids.end()) {
+            kabot::providers::Message placeholder{};
+            placeholder.role = "tool";
+            placeholder.tool_call_id = id;
+            placeholder.name = "unknown";
+            placeholder.content = "[Tool result missing due to internal error]";
+            messages.push_back(std::move(placeholder));
+        }
+    }
+
+    // 6. Coalesce stray system-reminder text blocks into adjacent tool messages
     std::vector<kabot::providers::Message> merged;
     merged.reserve(messages.size());
     for (auto& msg : messages) {

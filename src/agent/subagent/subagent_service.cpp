@@ -91,11 +91,19 @@ SubagentService::SpawnResult SubagentService::Spawn(
     
     if (should_run_async) {
         std::string task_id = runner_->RunAsync(run_params);
-        return SpawnResult{"async_launched", task_id, agent_id, ""};
+        return SpawnResult{"async_launched", task_id, agent_id, "", 0, 0, 0, ""};
     }
-    
-    std::string result = runner_->RunSync(run_params);
-    return SpawnResult{"sync_result", "", agent_id, result};
+
+    auto summary = runner_->RunSync(run_params);
+    SpawnResult result;
+    result.type = "sync_result";
+    result.agent_id = summary.agent_id;
+    result.result = summary.result;
+    result.total_tokens = summary.total_tokens;
+    result.tool_calls_count = summary.tool_calls_count;
+    result.duration_ms = summary.duration_ms;
+    result.worktree_path = summary.worktree_path;
+    return result;
 }
 
 std::string SubagentService::Resume(const std::string& agent_id,

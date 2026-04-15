@@ -57,6 +57,7 @@ struct AgentSpawnInput {
     std::string mode = "spawn";
     std::string isolation = "none";
     std::string cwd;
+    std::string session_key;
 };
 
 struct SubagentContext {
@@ -93,11 +94,13 @@ struct RunAgentParams {
 struct AgentTaskRecord {
     std::string task_id;
     std::string agent_id;
+    std::string parent_session_id;
     std::string description;
     SubagentStatus status = SubagentStatus::kIdle;
     std::chrono::steady_clock::time_point started_at;
     std::optional<std::chrono::steady_clock::time_point> finished_at;
     std::string output_file;
+    int total_tokens = 0;
     struct Progress {
         std::string message;
         std::string last_tool_name;
@@ -132,5 +135,15 @@ struct SubagentMessage {
 
 using SubagentMessageHandler = std::function<void(const SubagentMessage&)>;
 using SubagentCompletionHandler = std::function<void(bool success, const std::string& result, const std::string& error)>;
+
+struct SubagentRunSummary {
+    std::string result;
+    std::string agent_id;
+    int total_tokens = 0;
+    int tool_calls_count = 0;
+    int duration_ms = 0;
+    std::string worktree_path;
+    std::string parent_session_id;
+};
 
 } // namespace kabot::subagent

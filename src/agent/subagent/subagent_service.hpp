@@ -25,19 +25,27 @@ public:
         std::string task_id;
         std::string agent_id;
         std::string result;
+        int total_tokens = 0;
+        int tool_calls_count = 0;
+        int duration_ms = 0;
+        std::string worktree_path;
     };
-    
+
     SpawnResult Spawn(const AgentSpawnInput& input,
                       const SubagentContext& parent_ctx);
-    
+
     std::string Resume(const std::string& agent_id,
                        const SubagentMessageHandler& on_message = {});
-    
+
     std::vector<AgentTaskRecord> ListTasks() const;
-    
+
     SubagentRunner& Runner() { return *runner_; }
     SubagentTaskManager& TaskManager() { return task_manager_; }
     SubagentTranscriptStore& TranscriptStore() { return transcript_store_; }
+
+    void SetTaskCompletionHandler(std::function<void(const AgentTaskRecord&)> handler) {
+        runner_->SetTaskCompletionHandler(std::move(handler));
+    }
     
 private:
     kabot::providers::LLMProvider& provider_;

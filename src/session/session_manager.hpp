@@ -60,6 +60,9 @@ public:
     void SetUpdatedAt(std::string updated_at) { updated_at_ = std::move(updated_at); }
     void SetMetadata(nlohmann::json metadata) { metadata_ = std::move(metadata); }
 
+    void AddPendingNotification(const std::string& notification);
+    std::vector<std::string> TakePendingNotifications();
+
 private:
     std::string key_;
     std::vector<SessionMessage> messages_;

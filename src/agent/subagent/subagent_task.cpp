@@ -7,18 +7,20 @@
 namespace kabot::subagent {
 
 std::string SubagentTaskManager::RegisterTask(const std::string& agent_id,
-                                               const std::string& description) {
+                                               const std::string& description,
+                                               const std::string& parent_session_id) {
     std::lock_guard<std::mutex> guard(mutex_);
     int id = ++task_counter_;
     std::string task_id = "subagent_task_" + std::to_string(id);
     AgentTaskRecord task;
     task.task_id = task_id;
     task.agent_id = agent_id;
+    task.parent_session_id = parent_session_id;
     task.description = description;
     task.status = SubagentStatus::kIdle;
     task.started_at = std::chrono::steady_clock::now();
     tasks_[task_id] = task;
-    LOG_INFO("[subagent] registered task={} agent={}", task_id, agent_id);
+    LOG_INFO("[subagent] registered task={} agent={} parent_session={}", task_id, agent_id, parent_session_id);
     return task_id;
 }
 
@@ -62,14 +64,16 @@ bool SubagentTaskManager::UpdateProgress(const std::string& task_id,
 }
 
 bool SubagentTaskManager::MarkCompleted(const std::string& task_id,
-                                         const std::string& output) {
+                                         const std::string& output,
+                                         int total_tokens) {
     std::lock_guard<std::mutex> guard(mutex_);
     auto it = tasks_.find(task_id);
     if (it == tasks_.end()) return false;
     it->second.status = SubagentStatus::kCompleted;
     it->second.finished_at = std::chrono::steady_clock::now();
     it->second.output_file = output;
-    LOG_INFO("[subagent] task completed task={}", task_id);
+    it->second.total_tokens = total_tokens;
+    LOG_INFO("[subagent] task completed task={} total_tokens={}", task_id, total_tokens);
     return true;
 }
 

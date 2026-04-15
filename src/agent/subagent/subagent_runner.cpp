@@ -1,6 +1,7 @@
 #include "agent/subagent/subagent_runner.hpp"
 
 #include <thread>
+#include <chrono>
 
 #include "agent/subagent/async_attribution.hpp"
 #include "agent/subagent/subagent_tool_filter.hpp"
@@ -21,19 +22,20 @@ SubagentRunner::SubagentRunner(kabot::providers::LLMProvider& provider,
     , workspace_(std::move(workspace))
     , defaults_(std::move(defaults)) {}
 
-std::string SubagentRunner::RunSync(const RunAgentParams& params,
-                                    const SubagentMessageHandler& on_message,
-                                    const std::string& task_id) {
+SubagentRunSummary SubagentRunner::RunSync(const RunAgentParams& params,
+                                           const SubagentMessageHandler& on_message,
+                                           const std::string& task_id) {
     return DoRun(params, on_message, task_id);
 }
 
 std::string SubagentRunner::RunAsync(const RunAgentParams& params) {
     std::string task_id = task_manager_.RegisterTask(
         params.tool_use_context.agent_id,
-        params.description);
-    
+        params.description,
+        params.tool_use_context.parent_session_id);
+
     task_manager_.UpdateStatus(task_id, SubagentStatus::kBackgrounded);
-    
+
     AgentTranscriptMetadata meta;
     meta.agent_id = params.tool_use_context.agent_id;
     meta.agent_type = params.agent_definition.agent_type;
@@ -45,18 +47,18 @@ std::string SubagentRunner::RunAsync(const RunAgentParams& params) {
     meta.created_at = std::chrono::steady_clock::now();
     transcript_store_.WriteMetadata(meta);
     transcript_store_.AppendMessages(params.tool_use_context.agent_id, params.prompt_messages);
-    
+
     std::thread([this, params, task_id]() {
         DoRunAsync(params, task_id);
     }).detach();
-    
+
     return task_id;
 }
 
 void SubagentRunner::DoRunAsync(const RunAgentParams& params,
                                 const std::string& task_id) {
     task_manager_.UpdateStatus(task_id, SubagentStatus::kRunningForeground);
-    
+
     AsyncAttribution::Set({
         params.tool_use_context.agent_id,
         params.tool_use_context.parent_session_id,
@@ -66,25 +68,42 @@ void SubagentRunner::DoRunAsync(const RunAgentParams& params,
         {},
         "spawn"
     });
-    
+
+    SubagentRunSummary summary;
     try {
-        auto result = DoRun(params, {}, task_id);
-        task_manager_.MarkCompleted(task_id, result);
+        summary = DoRun(params, {}, task_id);
+        task_manager_.MarkCompleted(task_id, summary.result, summary.total_tokens);
+        if (task_completion_handler_) {
+            if (auto* task = task_manager_.GetTask(task_id)) {
+                task_completion_handler_(*task);
+            }
+        }
     } catch (const std::exception& ex) {
         task_manager_.MarkFailed(task_id, "runtime_error", ex.what(), false);
+        if (task_completion_handler_) {
+            if (auto* task = task_manager_.GetTask(task_id)) {
+                task_completion_handler_(*task);
+            }
+        }
     } catch (...) {
         task_manager_.MarkFailed(task_id, "unknown", "unknown error", false);
+        if (task_completion_handler_) {
+            if (auto* task = task_manager_.GetTask(task_id)) {
+                task_completion_handler_(*task);
+            }
+        }
     }
-    
+
     AsyncAttribution::Clear();
 }
 
-std::string SubagentRunner::DoRun(const RunAgentParams& params,
-                                  const SubagentMessageHandler& on_message,
-                                  const std::string& task_id) {
+SubagentRunSummary SubagentRunner::DoRun(const RunAgentParams& params,
+                                         const SubagentMessageHandler& on_message,
+                                         const std::string& task_id) {
+    const auto start_time = std::chrono::steady_clock::now();
     const auto& agent_def = params.agent_definition;
     const auto& child_ctx = params.tool_use_context;
-    
+
     std::string model = agent_def.model;
     if (model.empty() || model == "inherit") {
         model = defaults_.model.empty() ? provider_.GetDefaultModel() : defaults_.model;
@@ -92,14 +111,14 @@ std::string SubagentRunner::DoRun(const RunAgentParams& params,
     if (!params.model.empty()) {
         model = params.model;
     }
-    
+
     auto messages = params.prompt_messages;
     if (!params.fork_context_messages.empty()) {
         messages.insert(messages.begin(),
                         params.fork_context_messages.begin(),
                         params.fork_context_messages.end());
     }
-    
+
     if (messages.empty() || messages[0].role != "system") {
         kabot::providers::Message sys_msg;
         sys_msg.role = "system";
@@ -108,39 +127,54 @@ std::string SubagentRunner::DoRun(const RunAgentParams& params,
     } else if (agent_def.get_system_prompt) {
         messages[0].content = agent_def.get_system_prompt();
     }
-    
+
     auto all_tools = tools_.GetDefinitions();
     auto resolved_tools = ResolveAgentTools(
         all_tools, agent_def, params.is_async, params.allowed_tools);
-    
+
     int max_turns = params.max_turns > 0 ? params.max_turns :
                     (agent_def.max_turns > 0 ? agent_def.max_turns : defaults_.max_iterations);
-    
+
     transcript_store_.AppendMessages(child_ctx.agent_id, messages);
-    
+
     int turns = 0;
     std::string final_content;
-    
+    int total_tokens = 0;
+    int tool_calls_count = 0;
+
     LOG_INFO("[subagent] run agent_id={} type={} model={} async={} max_turns={}",
              child_ctx.agent_id, agent_def.agent_type, model,
              params.is_async ? "true" : "false", max_turns);
-    
+
     while (turns < max_turns) {
         turns++;
-        
+
         if (task_manager_.GetTask(task_id) &&
             task_manager_.GetTask(task_id)->status == SubagentStatus::kAborted) {
             LOG_INFO("[subagent] aborted agent_id={}", child_ctx.agent_id);
             throw std::runtime_error("subagent aborted");
         }
-        
+
         auto response = provider_.Chat(
             messages,
             resolved_tools,
             model,
             defaults_.max_tokens,
             defaults_.temperature);
-        
+
+        if (!response.usage.empty()) {
+            auto it = response.usage.find("total_tokens");
+            if (it != response.usage.end() && it->second > 0) {
+                total_tokens += it->second;
+            } else {
+                auto pit = response.usage.find("prompt_tokens");
+                auto cit = response.usage.find("completion_tokens");
+                int prompt = (pit != response.usage.end()) ? pit->second : 0;
+                int completion = (cit != response.usage.end()) ? cit->second : 0;
+                total_tokens += prompt + completion;
+            }
+        }
+
         if (on_message) {
             SubagentMessage msg;
             msg.type = "assistant";
@@ -150,21 +184,23 @@ std::string SubagentRunner::DoRun(const RunAgentParams& params,
             msg.raw_message.tool_calls = response.tool_calls;
             on_message(msg);
         }
-        
+
         if (response.HasToolCalls()) {
+            tool_calls_count += static_cast<int>(response.tool_calls.size());
+
             kabot::providers::Message assistant_msg;
             assistant_msg.role = "assistant";
             assistant_msg.content = response.content;
             assistant_msg.tool_calls = response.tool_calls;
             messages.push_back(assistant_msg);
-            
+
             transcript_store_.AppendMessage(child_ctx.agent_id, messages.back());
-            
+
             for (const auto& call : response.tool_calls) {
                 if (params.can_use_tool && !params.can_use_tool(call.name)) {
                     std::string err = "Error: tool '" + call.name + "' is not allowed for this subagent";
                     LOG_WARN("[subagent] tool_denied agent_id={} tool={}", child_ctx.agent_id, call.name);
-                    
+
                     kabot::providers::Message tool_msg;
                     tool_msg.role = "tool";
                     tool_msg.tool_call_id = call.id;
@@ -172,7 +208,7 @@ std::string SubagentRunner::DoRun(const RunAgentParams& params,
                     tool_msg.content = err;
                     messages.push_back(tool_msg);
                     transcript_store_.AppendMessage(child_ctx.agent_id, tool_msg);
-                    
+
                     if (on_message) {
                         SubagentMessage tm;
                         tm.type = "tool_result";
@@ -184,14 +220,14 @@ std::string SubagentRunner::DoRun(const RunAgentParams& params,
                     }
                     continue;
                 }
-                
+
                 std::string result;
                 try {
                     result = tools_.Execute(call.name, call.arguments);
                 } catch (const std::exception& ex) {
                     result = std::string("Error: ") + ex.what();
                 }
-                
+
                 kabot::providers::Message tool_msg;
                 tool_msg.role = "tool";
                 tool_msg.tool_call_id = call.id;
@@ -199,7 +235,7 @@ std::string SubagentRunner::DoRun(const RunAgentParams& params,
                 tool_msg.content = result;
                 messages.push_back(tool_msg);
                 transcript_store_.AppendMessage(child_ctx.agent_id, tool_msg);
-                
+
                 if (on_message) {
                     SubagentMessage tm;
                     tm.type = "tool_result";
@@ -209,11 +245,12 @@ std::string SubagentRunner::DoRun(const RunAgentParams& params,
                     tm.raw_message = tool_msg;
                     on_message(tm);
                 }
-                
+
                 if (task_manager_.GetTask(task_id)) {
                     AgentTaskRecord::Progress prog;
                     prog.last_tool_name = call.name;
                     prog.turns = turns;
+                    prog.tokens = total_tokens;
                     task_manager_.UpdateProgress(task_id, prog);
                 }
             }
@@ -222,18 +259,32 @@ std::string SubagentRunner::DoRun(const RunAgentParams& params,
             break;
         }
     }
-    
+
     if (final_content.empty()) {
         final_content = "Background task completed.";
     }
-    
+
     kabot::providers::Message final_msg;
     final_msg.role = "assistant";
     final_msg.content = final_content;
     transcript_store_.AppendMessage(child_ctx.agent_id, final_msg);
-    
-    LOG_INFO("[subagent] completed agent_id={} turns={}", child_ctx.agent_id, turns);
-    return final_content;
+
+    const auto end_time = std::chrono::steady_clock::now();
+    const auto duration_ms = static_cast<int>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count());
+
+    LOG_INFO("[subagent] completed agent_id={} turns={} tokens={} tool_calls={} duration_ms={}",
+             child_ctx.agent_id, turns, total_tokens, tool_calls_count, duration_ms);
+
+    SubagentRunSummary summary;
+    summary.result = final_content;
+    summary.agent_id = child_ctx.agent_id;
+    summary.total_tokens = total_tokens;
+    summary.tool_calls_count = tool_calls_count;
+    summary.duration_ms = duration_ms;
+    summary.worktree_path = params.worktree_path;
+    summary.parent_session_id = child_ctx.parent_session_id;
+    return summary;
 }
 
 std::string SubagentRunner::Resume(const std::string& agent_id,
@@ -242,12 +293,12 @@ std::string SubagentRunner::Resume(const std::string& agent_id,
     if (meta.agent_id.empty()) {
         throw std::runtime_error("Cannot resume: metadata not found for agent " + agent_id);
     }
-    
+
     auto messages = transcript_store_.LoadMessages(agent_id);
     if (messages.empty()) {
         throw std::runtime_error("Cannot resume: transcript empty for agent " + agent_id);
     }
-    
+
     RunAgentParams params;
     params.agent_definition.agent_type = meta.agent_type;
     params.agent_definition.get_system_prompt = []() { return ""; };
@@ -258,17 +309,17 @@ std::string SubagentRunner::Resume(const std::string& agent_id,
     params.tool_use_context.parent_session_id = meta.parent_session_id;
     params.worktree_path = meta.worktree_path;
     params.is_async = true;
-    
+
     auto task = task_manager_.GetTaskByAgentId(agent_id);
     std::string task_id = task ? task->task_id : "";
     if (task_id.empty()) {
-        task_id = task_manager_.RegisterTask(agent_id, meta.description);
+        task_id = task_manager_.RegisterTask(agent_id, meta.description, meta.parent_session_id);
     }
     task_manager_.UpdateStatus(task_id, SubagentStatus::kResumedRunning);
-    
+
     meta.invocation_kind = "resume";
     transcript_store_.WriteMetadata(meta);
-    
+
     std::thread([this, params, task_id, on_message]() {
         AsyncAttribution::Set({
             params.tool_use_context.agent_id,
@@ -281,13 +332,23 @@ std::string SubagentRunner::Resume(const std::string& agent_id,
         });
         try {
             auto result = DoRun(params, on_message, task_id);
-            task_manager_.MarkCompleted(task_id, result);
+            task_manager_.MarkCompleted(task_id, result.result, result.total_tokens);
+            if (task_completion_handler_) {
+                if (auto* task = task_manager_.GetTask(task_id)) {
+                    task_completion_handler_(*task);
+                }
+            }
         } catch (const std::exception& ex) {
             task_manager_.MarkFailed(task_id, "resume_error", ex.what(), false);
+            if (task_completion_handler_) {
+                if (auto* task = task_manager_.GetTask(task_id)) {
+                    task_completion_handler_(*task);
+                }
+            }
         }
         AsyncAttribution::Clear();
     }).detach();
-    
+
     return task_id;
 }
 
