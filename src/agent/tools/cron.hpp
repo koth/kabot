@@ -17,7 +17,11 @@ public:
                     const std::string& to);
 
     std::string Name() const override { return "cron"; }
-    std::string Description() const override { return "Manage scheduled cron jobs."; }
+    std::string Description() const override {
+        return "Manage scheduled cron jobs. Only use this tool when the user explicitly requests "
+               "creating, listing, removing, enabling, disabling, or running a scheduled task or reminder. "
+               "Do NOT call this tool for casual conversation, greetings, or questions unrelated to scheduling.";
+    }
     std::string ParametersJson() const override;
     std::string Execute(const std::unordered_map<std::string, std::string>& params) override;
 

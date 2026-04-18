@@ -389,13 +389,20 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
             plan_tool->SetContext(target.channel, target.channel_instance, target.chat_id, {});
         }
     }
+    if (auto* tool = tools_.Get("cron")) {
+        if (auto* cron_tool = dynamic_cast<kabot::agent::tools::CronTool*>(tool)) {
+            const auto target_channel = target.channel_instance.empty() ? target.channel : target.channel_instance;
+            cron_tool->SetContext({}, target_channel, target.chat_id);
+        }
+    }
     auto session = sessions_.GetOrCreate(session_key);
     auto history = session.GetHistory(static_cast<std::size_t>(config_.max_history_messages));
     auto messages = context_.BuildMessages(history, content, {});
     for (const auto& notif : session.TakePendingNotifications()) {
         kabot::providers::Message notif_msg;
         notif_msg.role = "user";
-        notif_msg.content = notif;
+        notif_msg.content = "[System notification] " + notif + "\n\n(This is an automated notification, not a user message. Do not respond to it directly.)";
+        notif_msg.is_virtual = true;
         messages.push_back(std::move(notif_msg));
     }
     DirectExecutionPhase last_phase = DirectExecutionPhase::kReceived;
@@ -575,7 +582,8 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
     for (const auto& notif : session.TakePendingNotifications()) {
         kabot::providers::Message notif_msg;
         notif_msg.role = "user";
-        notif_msg.content = notif;
+        notif_msg.content = "[System notification] " + notif + "\n\n(This is an automated notification, not a user message. Do not respond to it directly.)";
+        notif_msg.is_virtual = true;
         messages.push_back(std::move(notif_msg));
     }
 
@@ -799,7 +807,8 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
     for (const auto& notif : session.TakePendingNotifications()) {
         kabot::providers::Message notif_msg;
         notif_msg.role = "user";
-        notif_msg.content = notif;
+        notif_msg.content = "[System notification] " + notif + "\n\n(This is an automated notification, not a user message. Do not respond to it directly.)";
+        notif_msg.is_virtual = true;
         messages.push_back(std::move(notif_msg));
     }
 
