@@ -11,6 +11,7 @@
 
 #include "agent/memory_store.hpp"
 #include "nlohmann/json.hpp"
+#include "session/session_manager.hpp"
 #include "utils/cancel_token.hpp"
 #include "utils/logging.hpp"
 
@@ -38,6 +39,22 @@ bool ContainsAny(const std::string& content, const std::initializer_list<std::st
     return std::any_of(markers.begin(), markers.end(), [&content](const std::string_view marker) {
         return content.find(marker) != std::string::npos;
     });
+}
+
+std::string Trim(std::string value) {
+    auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
+    value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
+    return value;
+}
+
+void CheckStatusUpdate(const kabot::relay::RelayTaskStatusUpdateResult& result,
+                       const std::string& task_id,
+                       const std::string& status) {
+    if (!result.success) {
+        LOG_WARN("[task_runtime] failed to update task {} status to '{}': http_status={} message={}",
+                 task_id, status, result.http_status, result.message);
+    }
 }
 
 // Format dependency info for status summary
@@ -87,6 +104,41 @@ std::string BuildContextSummary(const kabot::relay::RelayTask& task) {
         oss << " | MR: " << task.merge_request;
     }
     
+    return oss.str();
+}
+
+// Build execution log from session history for verification
+std::string BuildExecutionLogFromSession(const kabot::session::Session& session) {
+    std::ostringstream oss;
+    const auto& messages = session.Messages();
+    int step = 1;
+    for (const auto& msg : messages) {
+        if (msg.role == "assistant") {
+            oss << "Step " << step << " [Agent]: ";
+            if (!msg.tool_calls.empty()) {
+                oss << "Called tools: ";
+                for (size_t i = 0; i < msg.tool_calls.size(); ++i) {
+                    if (i > 0) oss << ", ";
+                    oss << msg.tool_calls[i].name;
+                }
+                oss << "\n";
+            } else {
+                oss << msg.content.substr(0, 500);
+                if (msg.content.length() > 500) {
+                    oss << "... (truncated)";
+                }
+                oss << "\n";
+            }
+            ++step;
+        } else if (msg.role == "tool") {
+            oss << "  [Tool Result - " << msg.name << "]: ";
+            oss << msg.content.substr(0, 300);
+            if (msg.content.length() > 300) {
+                oss << "... (truncated)";
+            }
+            oss << "\n";
+        }
+    }
     return oss.str();
 }
 
@@ -276,13 +328,13 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
     const auto context_summary = BuildContextSummary(task);
 
     // Step 1: Report claimed status
-    relay_.UpdateTaskStatus(local_agent, task.task_id, {
+    CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
         "claimed",
         "Claimed task " + task.task_id + " and preparing context",
         0,
         NowIso(),
         session_key
-    });
+    }), task.task_id, "claimed");
 
     // Write claim memory
     WriteTaskMemory(workspace, task.task_id, project_name, "claimed", 
@@ -295,13 +347,13 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
     }
     running_summary += ": " + task.title;
     
-    relay_.UpdateTaskStatus(local_agent, task.task_id, {
+    CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
         "running",
         running_summary,
         5,
         NowIso(),
         session_key
-    });
+    }), task.task_id, "running");
 
     // Write start memory
     WriteTaskMemory(workspace, task.task_id, project_name, "running", 
@@ -327,13 +379,13 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             if (finished.load()) return;
             LOG_WARN("[task_runtime] task {} on agent {} hard-abandoned after timeout", task_id, local_agent);
             ClearActiveTask(local_agent);
-            relay_.UpdateTaskStatus(local_agent, task_id, {
+            CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task_id, {
                 "failed",
                 "Task " + task_id + " timed out and was abandoned",
                 -1,
                 NowIso(),
                 session_key
-            });
+            }), task_id, "failed");
         }).detach();
     }
 
@@ -342,13 +394,13 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
                                workspace, task, project_name](kabot::agent::DirectExecutionPhase phase) {
             const auto phase_summary = kabot::agent::DirectExecutionPhaseSummary(phase);
 
-            relay_.UpdateTaskStatus(local_agent, task_id, {
+            CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task_id, {
                 "running",
                 phase_summary,
                 -1,
                 NowIso(),
                 session_key
-            });
+            }), task_id, "running");
 
             if (phase == kabot::agent::DirectExecutionPhase::kCallingTools) {
                 WriteTaskMemory(workspace, task_id, project_name, "running",
@@ -412,7 +464,7 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
                 active_tasks_.erase(local_agent);
                 SaveState();
             }
-            relay_.UpdateTaskStatus(local_agent, task.task_id, {
+            CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
                 "waiting_user",
                 waiting_question.empty() ? "Waiting for user input on task " + task.task_id
                                         : waiting_question,
@@ -422,34 +474,65 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
                 {},
                 {},
                 waiting_user
-            });
+            }), task.task_id, "waiting_user");
             finished.store(true);
             return;
         }
 
+        // Step 3: Verify task completion
+        std::string verification_reason;
+        bool verification_passed = true;
+        try {
+            const auto session = agents_.GetSession(local_agent, session_key);
+            const auto execution_log = BuildExecutionLog(session);
+
+            verification_passed = VerifyTaskCompletion(local_agent, session_key,
+                                                        task.instruction, result,
+                                                        execution_log, verification_reason);
+        } catch (const std::exception& ex) {
+            LOG_WARN("[task_runtime] verification failed for task {}: {}", task.task_id, ex.what());
+            verification_reason = "Verification error: " + std::string(ex.what());
+            verification_passed = true;  // Fail open: if verifier breaks, don't block completion
+        }
+
         ClearActiveTask(local_agent);
 
-        relay_.UpdateTaskStatus(local_agent, task.task_id, {
-            "completed",
-            "Task " + task.task_id + " finished successfully",
-            100,
-            NowIso(),
-            session_key,
-            result
-        });
+        if (verification_passed) {
+            CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
+                "completed",
+                "Task " + task.task_id + " finished successfully",
+                100,
+                NowIso(),
+                session_key,
+                result
+            }), task.task_id, "completed");
 
-        std::string result_summary = result;
-        if (result_summary.length() > 200) {
-            result_summary = result_summary.substr(0, 197) + "...";
+            std::string result_summary = result;
+            if (result_summary.length() > 200) {
+                result_summary = result_summary.substr(0, 197) + "...";
+            }
+            WriteTaskMemory(workspace, task.task_id, project_name, "completed",
+                           "Task finished successfully", result_summary);
+        } else {
+            CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
+                "failed",
+                "Task " + task.task_id + " failed verification: " + verification_reason,
+                -1,
+                NowIso(),
+                session_key,
+                {},
+                verification_reason
+            }), task.task_id, "failed");
+
+            WriteTaskMemory(workspace, task.task_id, project_name, "failed",
+                           "Task failed verification", verification_reason);
         }
-        WriteTaskMemory(workspace, task.task_id, project_name, "completed",
-                       "Task finished successfully", result_summary);
 
     } catch (const std::exception& ex) {
         ClearActiveTask(local_agent);
 
         const bool cancelled = cancel_token.IsCancelled();
-        relay_.UpdateTaskStatus(local_agent, task.task_id, {
+        CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
             "failed",
             cancelled ? "Task " + task.task_id + " cancelled after timeout"
                       : "Task " + task.task_id + " failed because " + ex.what(),
@@ -458,7 +541,7 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             session_key,
             {},
             cancelled ? "task cancelled by timeout" : ex.what()
-        });
+        }), task.task_id, "failed");
 
         WriteTaskMemory(workspace, task.task_id, project_name, "failed",
                        cancelled ? "Task cancelled by timeout" : "Task failed",
@@ -467,7 +550,7 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
         ClearActiveTask(local_agent);
 
         const bool cancelled = cancel_token.IsCancelled();
-        relay_.UpdateTaskStatus(local_agent, task.task_id, {
+        CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
             "failed",
             cancelled ? "Task " + task.task_id + " cancelled after timeout"
                       : "Task " + task.task_id + " failed because unknown task runtime error",
@@ -476,7 +559,7 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             session_key,
             {},
             cancelled ? "task cancelled by timeout" : "unknown task runtime error"
-        });
+        }), task.task_id, "failed");
 
         WriteTaskMemory(workspace, task.task_id, project_name, "failed",
                        cancelled ? "Task cancelled by timeout" : "Task failed with unknown error");
@@ -536,7 +619,7 @@ bool TaskRuntime::ResumeWaitingTask(const WaitingTask& waiting_task,
                                        next_waiting.agent_name,
                                        next_waiting.chat_id)] = std::move(next_waiting);
         SaveState();
-        relay_.UpdateTaskStatus(waiting_task.local_agent, waiting_task.task_id, {
+        CheckStatusUpdate(relay_.UpdateTaskStatus(waiting_task.local_agent, waiting_task.task_id, {
             "waiting_user",
             waiting_question.empty() ? "waiting for user reply" : waiting_question,
             50,
@@ -545,7 +628,7 @@ bool TaskRuntime::ResumeWaitingTask(const WaitingTask& waiting_task,
             {},
             {},
             waiting_user
-        });
+        }), waiting_task.task_id, "waiting_user");
         return false;
     }
     return true;
@@ -698,13 +781,13 @@ bool TaskRuntime::TryResumeWaitingTask(const kabot::bus::InboundMessage& msg,
         SaveState();
     }
 
-    relay_.UpdateTaskStatus(waiting_task.local_agent, waiting_task.task_id, {
+    CheckStatusUpdate(relay_.UpdateTaskStatus(waiting_task.local_agent, waiting_task.task_id, {
         "running",
         "resumed after user reply",
         60,
         NowIso(),
         waiting_task.session_key
-    });
+    }), waiting_task.task_id, "running");
     std::string result;
     const auto completed = ResumeWaitingTask(waiting_task, msg.content, result);
     outbound.channel = msg.channel;
@@ -713,14 +796,64 @@ bool TaskRuntime::TryResumeWaitingTask(const kabot::bus::InboundMessage& msg,
     outbound.chat_id = msg.chat_id;
     outbound.content = result;
     if (completed) {
-        relay_.UpdateTaskStatus(waiting_task.local_agent, waiting_task.task_id, {
-            "completed",
-            "task completed",
-            100,
-            NowIso(),
-            waiting_task.session_key,
-            result
-        });
+        // Verify task completion after resume
+        std::string verification_reason;
+        bool verification_passed = true;
+        try {
+            const auto* agent_config = agents_.GetAgentConfig(waiting_task.local_agent);
+            const std::string workspace = agent_config ? agent_config->workspace : config_.agents.defaults.workspace;
+            const std::string project_name = waiting_task.task_id;
+
+            const auto session = agents_.GetSession(waiting_task.local_agent, waiting_task.session_key);
+            const auto execution_log = BuildExecutionLog(session);
+
+            // Get original instruction from session or use empty
+            std::string original_instruction;
+            for (const auto& m : session.Messages()) {
+                if (m.role == "user" && !m.content.empty()) {
+                    original_instruction = m.content;
+                    break;
+                }
+            }
+
+            verification_passed = VerifyTaskCompletion(waiting_task.local_agent,
+                                                        waiting_task.session_key,
+                                                        original_instruction,
+                                                        result,
+                                                        execution_log,
+                                                        verification_reason);
+
+            if (verification_passed) {
+                CheckStatusUpdate(relay_.UpdateTaskStatus(waiting_task.local_agent, waiting_task.task_id, {
+                    "completed",
+                    "task completed",
+                    100,
+                    NowIso(),
+                    waiting_task.session_key,
+                    result
+                }), waiting_task.task_id, "completed");
+            } else {
+                CheckStatusUpdate(relay_.UpdateTaskStatus(waiting_task.local_agent, waiting_task.task_id, {
+                    "failed",
+                    "Task " + waiting_task.task_id + " failed verification after resume: " + verification_reason,
+                    -1,
+                    NowIso(),
+                    waiting_task.session_key,
+                    {},
+                    verification_reason
+                }), waiting_task.task_id, "failed");
+            }
+        } catch (const std::exception& ex) {
+            LOG_WARN("[task_runtime] verification failed for resumed task {}: {}", waiting_task.task_id, ex.what());
+            CheckStatusUpdate(relay_.UpdateTaskStatus(waiting_task.local_agent, waiting_task.task_id, {
+                "completed",
+                "task completed (verification skipped due to error)",
+                100,
+                NowIso(),
+                waiting_task.session_key,
+                result
+            }), waiting_task.task_id, "completed");
+        }
     }
     return true;
 }
@@ -861,6 +994,55 @@ bool TaskRuntime::ShouldWaitForUser(const kabot::bus::InboundMessage& msg,
     }
 
     return false;
+}
+
+std::string TaskRuntime::BuildExecutionLog(const kabot::session::Session& session) const {
+    return BuildExecutionLogFromSession(session);
+}
+
+bool TaskRuntime::VerifyTaskCompletion(const std::string& local_agent,
+                                       const std::string& session_key,
+                                       const std::string& instruction,
+                                       const std::string& result,
+                                       const std::string& execution_log,
+                                       std::string& verification_reason) {
+    if (execution_log.empty()) {
+        verification_reason = "No execution log available, skipping verification";
+        return true;
+    }
+
+    std::ostringstream prompt;
+    prompt << "You are a task completion verifier. Your job is to check whether the agent truly completed the task based on its execution history.\n\n";
+    prompt << "Original Task Instruction:\n" << instruction << "\n\n";
+    prompt << "Agent Final Result:\n" << result.substr(0, 1000) << "\n\n";
+    prompt << "Execution History:\n" << execution_log << "\n\n";
+    prompt << "Analyze whether the task is COMPLETE. Consider:\n";
+    prompt << "1. Did the agent actually perform the required actions (file reads, edits, commands, etc.)?\n";
+    prompt << "2. Does the final result match the task requirements?\n";
+    prompt << "3. Did the agent claim completion without doing anything?\n";
+    prompt << "4. Are there any obvious errors or missing steps?\n\n";
+    prompt << "Respond with exactly one of:\n";
+    prompt << "- \"VERIFIED: <brief reason>\" if the task is truly complete\n";
+    prompt << "- \"INCOMPLETE: <brief reason>\" if the task is not truly complete\n";
+
+    const std::string verifier_session_key = session_key + ":verify";
+    kabot::CancelToken cancel_token;
+    const auto verification_result = agents_.ProcessDirect(local_agent,
+                                                            prompt.str(),
+                                                            verifier_session_key,
+                                                            {},
+                                                            {},
+                                                            {},
+                                                            cancel_token);
+
+    const auto trimmed = Trim(verification_result);
+    if (trimmed.find("INCOMPLETE") == 0 || trimmed.find("incomplete") != std::string::npos) {
+        verification_reason = trimmed;
+        return false;
+    }
+
+    verification_reason = trimmed;
+    return true;
 }
 
 namespace {

@@ -188,6 +188,16 @@ std::string AgentRegistry::ProcessDirect(const std::string& agent_name,
     return it->second->ProcessDirect(content, session_key, observer, target, outbound_observer, cancel_token);
 }
 
+kabot::session::Session AgentRegistry::GetSession(const std::string& agent_name,
+                                                  const std::string& session_key) {
+    const auto resolved = agent_name.empty() ? DefaultAgentName() : agent_name;
+    auto it = agents_.find(resolved);
+    if (it == agents_.end()) {
+        return kabot::session::Session(session_key);
+    }
+    return it->second->GetSession(session_key);
+}
+
 const kabot::config::AgentInstanceConfig* AgentRegistry::GetAgentConfig(const std::string& name) const {
     return config_.FindAgent(name);
 }

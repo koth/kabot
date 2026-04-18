@@ -85,6 +85,13 @@ private:
     void ClearWaitingTask(const kabot::bus::InboundMessage& msg);
     bool ShouldWaitForUser(const kabot::bus::InboundMessage& msg,
                            const kabot::bus::OutboundMessage& outbound) const;
+    std::string BuildExecutionLog(const kabot::session::Session& session) const;
+    bool VerifyTaskCompletion(const std::string& local_agent,
+                              const std::string& session_key,
+                              const std::string& instruction,
+                              const std::string& result,
+                              const std::string& execution_log,
+                              std::string& verification_reason);
     void LoadState();
     void SaveState() const;
     void SaveWaitingTasks() const;

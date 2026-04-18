@@ -50,6 +50,8 @@ public:
                               const DirectExecutionTarget& target = {},
                               const DirectOutboundObserver& outbound_observer = {},
                               const kabot::CancelToken& cancel_token = {});
+    kabot::session::Session GetSession(const std::string& agent_name,
+                                       const std::string& session_key);
     const kabot::config::AgentInstanceConfig* GetAgentConfig(const std::string& name) const;
     std::string ResolveAgentName(const kabot::bus::InboundMessage& msg) const;
     std::string DefaultAgentName() const;

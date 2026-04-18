@@ -65,6 +65,7 @@ public:
     std::vector<std::string> RegisteredTools() const;
     std::string SpawnSubagent(const kabot::subagent::AgentSpawnInput& input,
                               const std::string& session_key = "");
+    kabot::session::Session GetSession(const std::string& session_key);
 
 private:
     kabot::bus::MessageBus& bus_;

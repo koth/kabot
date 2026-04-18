@@ -364,6 +364,11 @@ std::vector<std::string> AgentLoop::RegisteredTools() const {
     return tools_.List();
 }
 
+kabot::session::Session AgentLoop::GetSession(const std::string& session_key) {
+    auto session = sessions_.GetOrCreate(session_key);
+    return session;
+}
+
 std::string AgentLoop::ProcessDirect(const std::string& content,
                                      const std::string& session_key,
                                      const DirectExecutionObserver& observer,
