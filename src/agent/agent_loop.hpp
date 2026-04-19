@@ -36,6 +36,7 @@ struct DirectExecutionTarget {
     std::string channel;
     std::string channel_instance;
     std::string chat_id;
+    std::string working_directory;
 };
 
 std::string DirectExecutionPhaseSummary(DirectExecutionPhase phase);

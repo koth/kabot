@@ -398,6 +398,21 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
     auto session = sessions_.GetOrCreate(session_key);
     auto history = session.GetHistory(static_cast<std::size_t>(config_.max_history_messages));
     auto messages = context_.BuildMessages(history, content, {});
+    
+    // Inject working directory context if provided
+    if (!target.working_directory.empty()) {
+        kabot::providers::Message context_msg;
+        context_msg.role = "user";
+        context_msg.content = "[System context] You are working inside a cloned git repository at: " + target.working_directory + 
+                             "\nAll file operations and shell commands should be relative to this directory unless explicitly directed otherwise." +
+                             "\nCommit your changes when done.";
+        context_msg.is_virtual = true;
+        // Insert after system message (first element)
+        if (!messages.empty()) {
+            messages.insert(messages.begin() + 1, std::move(context_msg));
+        }
+    }
+    
     for (const auto& notif : session.TakePendingNotifications()) {
         kabot::providers::Message notif_msg;
         notif_msg.role = "user";

@@ -253,6 +253,7 @@ RelayTask ParseRelayTask(const Json& json) {
         task.project.project_id = project.value("projectId", std::string());
         task.project.name = project.value("name", std::string());
         task.project.description = project.value("description", std::string());
+        task.project.git_url = project.value("gitUrl", std::string());
         if (project.contains("metadata") && project["metadata"].is_object()) {
             task.project.metadata = ParseStringMap(project, "metadata");
         }
@@ -687,6 +688,15 @@ http::request<http::string_body> BuildTaskStatusRequest(
             {"chatId", update.waiting_user.chat_id},
             {"replyTo", update.waiting_user.reply_to}
         };
+    }
+    if (update.merge_request.has_value()) {
+        body["mergeRequest"] = {
+            {"url", update.merge_request->url},
+            {"createdAt", update.merge_request->created_at}
+        };
+        if (!update.merge_request->merged_at.empty()) {
+            body["mergeRequest"]["mergedAt"] = update.merge_request->merged_at;
+        }
     }
 
     http::request<http::string_body> request{http::verb::post, BuildTaskStatusTarget(config, task_id), 11};

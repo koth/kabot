@@ -366,6 +366,35 @@ add_executable(task_decomposer_tests
 )
 target_link_libraries(task_decomposer_tests PRIVATE kabot_core)
 
+add_executable(task_workflow_tests
+  task_workflow_tests.cpp
+  relay/relay_manager.cpp
+  task/task_runtime.cpp
+  agent/agent_registry.cpp
+  agent/agent_loop.cpp
+  agent/context_builder.cpp
+  agent/memory_store.cpp
+  agent/skills_loader.cpp
+  agent/tools/tool_registry.cpp
+  agent/tools/cron.cpp
+  agent/tools/message.cpp
+  agent/tools/plan_work.cpp
+  agent/tools/shell.cpp
+  agent/tools/filesystem.cpp
+  agent/tools/spawn.cpp
+  agent/tools/todo.cpp
+  agent/tools/web.cpp
+  agent/tools/tool_schema_validator.cpp
+  sandbox/sandbox_executor.cpp
+  cron/cron_service.cpp
+  session/session_manager.cpp
+  bus/message_bus.cpp
+  config/config_loader.cpp
+  providers/llm_provider.cpp
+  providers/litellm_provider.cpp
+)
+target_link_libraries(task_workflow_tests PRIVATE kabot_core)
+
 if(APPLE)
   target_link_options(kabot_cli PRIVATE "-Wl,-no_warn_duplicate_libraries")
 endif()

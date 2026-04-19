@@ -3,6 +3,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -24,6 +25,7 @@ struct RelayTaskProject {
     std::string project_id;
     std::string name;
     std::string description;
+    std::string git_url;
     std::unordered_map<std::string, std::string> metadata;
 };
 
@@ -56,6 +58,12 @@ struct RelayTaskClaimResult {
     RelayTask task;
 };
 
+struct RelayTaskMergeRequest {
+    std::string url;
+    std::string created_at;
+    std::string merged_at;
+};
+
 struct RelayTaskStatusUpdate {
     std::string status;
     std::string message;
@@ -65,6 +73,7 @@ struct RelayTaskStatusUpdate {
     std::string result;
     std::string error;
     RelayTaskInteraction waiting_user;
+    std::optional<RelayTaskMergeRequest> merge_request;
 };
 
 struct RelayTaskStatusUpdateResult {

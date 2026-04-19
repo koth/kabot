@@ -23,16 +23,23 @@ ContextBuilder::ContextBuilder(std::string workspace, kabot::config::QmdConfig q
     , qmd_(std::move(qmd)) {}
 
 std::string ContextBuilder::BuildSystemPrompt(const std::vector<std::string>& skill_names) const {
-    return BuildSystemPrompt(skill_names, "");
+    return BuildSystemPrompt(skill_names, "", {});
 }
 
 std::string ContextBuilder::BuildSystemPrompt(
     const std::vector<std::string>& skill_names,
-    const std::string& current_message) const {
+    const std::string& current_message,
+    const std::string& working_directory) const {
     std::ostringstream oss;
     oss << "# kabot\n\n";
     oss << "## Workspace\n";
     oss << "Your workspace is at: " << workspace_ << "\n\n";
+    if (!working_directory.empty()) {
+        oss << "## Project Context\n";
+        oss << "You are working inside a cloned git repository at: " << working_directory << "\n";
+        oss << "All file operations and shell commands should be relative to this directory unless explicitly directed otherwise.\n";
+        oss << "Commit your changes when done.\n\n";
+    }
 #if defined(_WIN32)
     oss << "## Execution Environment\n";
     oss << "Host OS: Windows\n";

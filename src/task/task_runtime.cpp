@@ -4,10 +4,12 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <utility>
+#include <cstdlib>
 
 #include "agent/memory_store.hpp"
 #include "nlohmann/json.hpp"
@@ -26,6 +28,21 @@ std::string BuildWaitingKey(const std::string& channel_instance,
                             const std::string& agent_name,
                             const std::string& chat_id) {
     return channel_instance + ":" + agent_name + ":" + chat_id;
+}
+
+// Execute a shell command and return stdout
+std::string ExecuteCommand(const std::string& cmd) {
+    std::array<char, 128> buffer{};
+    std::string result;
+    FILE* pipe = _popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return "";
+    }
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+        result += buffer.data();
+    }
+    _pclose(pipe);
+    return result;
 }
 
 std::string ToLower(std::string value) {
@@ -324,6 +341,27 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
     const std::string workspace = agent_config ? agent_config->workspace : config_.agents.defaults.workspace;
     const std::string project_name = task.project.name.empty() ? task.project.project_id : task.project.name;
 
+    // Fetch project metadata if project_id is present
+    std::string project_git_url = task.project.git_url;
+    if (!task.project.project_id.empty() && project_git_url.empty()) {
+        const auto query_result = relay_.QueryProject(task.project.project_id);
+        if (query_result.success && !query_result.info.project_id.empty()) {
+            project_git_url = query_result.info.metadata.count("gitUrl")
+                ? query_result.info.metadata.at("gitUrl")
+                : std::string();
+        }
+    }
+
+    // Update active task with project info
+    {
+        std::lock_guard<std::mutex> guard(mutex_);
+        auto it = active_tasks_.find(local_agent);
+        if (it != active_tasks_.end()) {
+            it->second.project_name = project_name;
+            it->second.project_git_url = project_git_url;
+        }
+    }
+
     // Build context summary for status reporting
     const auto context_summary = BuildContextSummary(task);
 
@@ -364,6 +402,80 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
     std::string waiting_question;
     kabot::CancelToken cancel_token;
     std::atomic<bool> finished{false};
+
+    // Git workflow setup
+    std::filesystem::path project_dir;
+    bool has_git_workflow = false;
+    if (!project_git_url.empty() && !project_name.empty()) {
+        has_git_workflow = true;
+        project_dir = std::filesystem::path(workspace) / "projects" / project_name;
+        
+        // 2.1 Create projects/ directory
+        std::filesystem::create_directories(project_dir.parent_path());
+        
+        // 2.2 Clone repository
+        const auto clone_cmd = "git clone --depth 1 \"" + project_git_url + "\" \"" + project_dir.string() + "\" 2>&1";
+        const auto clone_output = ExecuteCommand(clone_cmd);
+        if (!std::filesystem::exists(project_dir / ".git")) {
+            // 2.3 Handle clone failure
+            LOG_ERROR("[task_runtime] Failed to clone repository: {}", clone_output);
+            CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
+                "failed",
+                "Failed to clone repository: " + clone_output,
+                -1,
+                NowIso(),
+                session_key
+            }), task.task_id, "failed");
+            ClearActiveTask(local_agent);
+            finished.store(true);
+            return;
+        }
+        
+        // 2.4 Verify .gitignore
+        const auto gitignore_path = project_dir / ".gitignore";
+        std::string gitignore_content;
+        if (std::filesystem::exists(gitignore_path)) {
+            std::ifstream gitignore_file(gitignore_path);
+            gitignore_content = std::string((std::istreambuf_iterator<char>(gitignore_file)),
+                                            std::istreambuf_iterator<char>());
+        }
+        
+        const std::vector<std::string> required_patterns = {
+            "build/", "*.exe", "*.tmp", ".env", ".vscode/", ".idea/", 
+            "*.log", "node_modules/", "__pycache__/", ".DS_Store", "Thumbs.db"
+        };
+        
+        bool needs_update = false;
+        std::string patterns_to_add;
+        for (const auto& pattern : required_patterns) {
+            if (gitignore_content.find(pattern) == std::string::npos) {
+                needs_update = true;
+                patterns_to_add += pattern + "\n";
+            }
+        }
+        
+        // 2.5 Update .gitignore if needed
+        if (needs_update) {
+            std::ofstream gitignore_out(gitignore_path, std::ios::app);
+            if (gitignore_out) {
+                gitignore_out << "\n# Added by kabot agent\n" << patterns_to_add;
+                gitignore_out.close();
+                
+                // Commit .gitignore update to default branch
+                ExecuteCommand("cd \"" + project_dir.string() + "\" && git add .gitignore && git commit -m \"chore: update .gitignore\"");
+            }
+        }
+        
+        // 2.6 Create task branch
+        const auto branch_name = "kabot-task-" + task.task_id;
+        const auto branch_cmd = "cd \"" + project_dir.string() + "\" && git checkout -b " + branch_name + " 2>&1";
+        const auto branch_output = ExecuteCommand(branch_cmd);
+        
+        // 2.7 Handle existing branch
+        if (branch_output.find("already exists") != std::string::npos) {
+            ExecuteCommand("cd \"" + project_dir.string() + "\" && git checkout " + branch_name + " && git reset --hard HEAD");
+        }
+    }
 
     const auto timeout_s = std::max(0, config_.task_system.task_timeout_s);
     const auto grace_s = std::max(0, config_.task_system.shutdown_timeout_s);
@@ -411,7 +523,8 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
         const kabot::agent::DirectExecutionTarget target{
             task.interaction.channel,
             task.interaction.channel_instance,
-            task.interaction.chat_id
+            task.interaction.chat_id,
+            has_git_workflow ? project_dir.string() : std::string()
         };
 
         const auto outbound_observer = [&](const kabot::bus::OutboundMessage& outbound) {
@@ -479,6 +592,45 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             return;
         }
 
+        // Post-execution: Commit, push, and create MR if git workflow is active
+        std::string mr_url;
+        std::string mr_created_at;
+        if (has_git_workflow && !project_dir.empty()) {
+            const auto branch_name = "kabot-task-" + task.task_id;
+            const auto project_path = project_dir.string();
+            
+            // 3.1 Detect uncommitted changes
+            const auto status_output = ExecuteCommand("cd \"" + project_path + "\" && git status --porcelain");
+            const bool has_changes = !Trim(status_output).empty();
+            
+            if (has_changes) {
+                // 3.2 Commit changes
+                const auto commit_msg = "kabot: " + task.title + " [task-" + task.task_id + "]";
+                ExecuteCommand("cd \"" + project_path + "\" && git add -A && git commit -m \"" + commit_msg + "\"");
+                
+                // 3.3 Push branch
+                ExecuteCommand("cd \"" + project_path + "\" && git push origin " + branch_name);
+                
+                // 3.4 Create MR using platform CLI
+                const auto mr_cmd = "cd \"" + project_path + "\" && (glab mr create --source-branch " + branch_name + 
+                                   " --target-branch main --title \"" + task.title + "\" --description \"Automated MR from kabot task " + task.task_id + "\" 2>&1 || " +
+                                   "gh pr create --head " + branch_name + " --base main --title \"" + task.title + "\" --body \"Automated PR from kabot task " + task.task_id + "\" 2>&1)";
+                const auto mr_output = ExecuteCommand(mr_cmd);
+                
+                // Extract MR URL from output
+                const auto url_pos = mr_output.find("http");
+                if (url_pos != std::string::npos) {
+                    const auto url_end = mr_output.find_first_of(" \t\n\r", url_pos);
+                    mr_url = mr_output.substr(url_pos, url_end != std::string::npos ? url_end - url_pos : std::string::npos);
+                    mr_created_at = NowIso();
+                } else {
+                    // 3.5 MR creation failed - log warning but continue
+                    LOG_WARN("[task_runtime] MR creation failed for task {}: {}", task.task_id, mr_output);
+                }
+            }
+            // 3.6 No changes - skip commit/push/MR
+        }
+
         // Step 3: Verify task completion
         std::string verification_reason;
         bool verification_passed = true;
@@ -498,14 +650,23 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
         ClearActiveTask(local_agent);
 
         if (verification_passed) {
-            CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
+            kabot::relay::RelayTaskStatusUpdate completed_update{
                 "completed",
                 "Task " + task.task_id + " finished successfully",
                 100,
                 NowIso(),
                 session_key,
                 result
-            }), task.task_id, "completed");
+            };
+            // 4.4 Include MR metadata if available
+            if (!mr_url.empty()) {
+                completed_update.merge_request = kabot::relay::RelayTaskMergeRequest{
+                    mr_url,
+                    mr_created_at
+                };
+            }
+            CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, completed_update),
+                              task.task_id, "completed");
 
             std::string result_summary = result;
             if (result_summary.length() > 200) {

@@ -17,7 +17,8 @@ public:
     std::string BuildSystemPrompt(const std::vector<std::string>& skill_names = {}) const;
     std::string BuildSystemPrompt(
         const std::vector<std::string>& skill_names,
-        const std::string& current_message) const;
+        const std::string& current_message,
+        const std::string& working_directory = {}) const;
     std::vector<kabot::providers::Message> BuildMessages(
         const std::vector<kabot::providers::Message>& history,
         const std::string& current_message,

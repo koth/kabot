@@ -61,6 +61,8 @@ private:
     struct ActiveTask {
         std::string task_id;
         std::string session_key;
+        std::string project_name;
+        std::string project_git_url;
     };
 
     void AgentPollLoop(const std::string& local_agent);

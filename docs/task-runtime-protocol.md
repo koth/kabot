@@ -353,6 +353,52 @@ queued|claimed|running|waiting_user
   -> canceled
 ```
 
+## Git-based Task Workflow (Agent Task Workflow)
+
+对于带有 `projectId` 的任务，gateway 客户端执行标准化的 git 工作流：
+
+1. **查询项目元数据**
+   - 调用 relay server 获取项目信息（包括 git URL）
+   
+2. **克隆仓库**
+   - 在 `{workspace}/projects/{project_name}/` 下执行浅克隆 (`git clone --depth 1`)
+   - 克隆失败：任务状态更新为 `failed`，终止执行
+
+3. **验证 .gitignore**
+   - 检查仓库根目录的 `.gitignore`
+   - 确保包含常见构建产物忽略模式（`build/`、`*.exe`、`.env`、IDE 目录等）
+   - 如缺失，自动补全并提交到默认分支
+
+4. **创建任务分支**
+   - 从默认分支创建 `kabot-task-{taskId}` 分支
+   - 如分支已存在，重置到默认分支最新状态
+
+5. **在仓库目录内执行任务**
+   - Agent 的所有文件操作和 shell 命令都在项目目录内执行
+   - 系统提示注入仓库路径上下文
+
+6. **提交更改并创建 MR**
+   - 检测未提交的更改 (`git status --porcelain`)
+   - 如存在更改：
+     - `git add -A`
+     - `git commit -m "kabot: {title} [task-{taskId}]"`
+     - `git push origin kabot-task-{taskId}`
+     - 创建 Merge Request 到 `master`/`main`
+   - 如 MR 创建失败，记录警告但任务仍标记为完成
+
+7. **上报 MR 元数据**
+   - 在 `completed` 状态更新中包含 `mergeRequest` 对象：
+   ```json
+   {
+     "status": "completed",
+     "mergeRequest": {
+       "url": "https://gitlab.com/.../merge_requests/1",
+       "createdAt": "2026-04-19T10:00:00Z",
+       "mergedAt": null
+     }
+   }
+   ```
+
 ## Client behavior expected by this protocol
 
 gateway 客户端应按以下顺序工作：
@@ -361,8 +407,10 @@ gateway 客户端应按以下顺序工作：
 2. 若 `found=false`，等待下一个轮询周期
 3. 若拿到任务：
    - 立即回写 `claimed`
+   - 查询项目元数据（如任务包含 `projectId`）
+   - 克隆仓库、验证 .gitignore、创建任务分支
    - 再回写 `running`
-4. 使用稳定 `sessionKey` 在本地执行
+4. 使用稳定 `sessionKey` 在本地执行（在项目目录内）
 5. 若 agent 输出需要用户确认：
    - 将问题发到真实用户 channel/chat
    - 回写 `waiting_user`
@@ -370,7 +418,9 @@ gateway 客户端应按以下顺序工作：
 6. 当真实用户回复后：
    - 回写 `running`
    - 用原 `sessionKey` 恢复执行
-7. 执行成功：回写 `completed`
+7. 执行成功：
+   - 提交更改、push、创建 MR
+   - 回写 `completed`（含 `mergeRequest` 元数据）
 8. 执行失败：回写 `failed`
 
 ## Error handling contract
