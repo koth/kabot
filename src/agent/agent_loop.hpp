@@ -37,6 +37,7 @@ struct DirectExecutionTarget {
     std::string channel_instance;
     std::string chat_id;
     std::string working_directory;
+    std::string upstream_merge_request;
 };
 
 std::string DirectExecutionPhaseSummary(DirectExecutionPhase phase);

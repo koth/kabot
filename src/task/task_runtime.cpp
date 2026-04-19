@@ -360,6 +360,11 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
         }
     }
 
+    // Check for upstream merge request context
+    if (!task.merge_request.empty()) {
+        LOG_INFO("[task_runtime] Task {} depends on upstream MR: {}", task.task_id, task.merge_request);
+    }
+
     // Update active task with project info
     {
         std::lock_guard<std::mutex> guard(mutex_);
@@ -373,10 +378,18 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
     // Build context summary for status reporting
     const auto context_summary = BuildContextSummary(task);
 
-    // Step 1: Report claimed status
+    // Step 1: Report claimed status with project context
+    std::string claimed_message = "Claimed task " + task.task_id;
+    if (!project_name.empty()) {
+        claimed_message += " for project " + project_name;
+        if (!project_git_url.empty()) {
+            claimed_message += " (git: " + project_git_url + ")";
+        }
+    }
+    claimed_message += " and preparing context";
     CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
         "claimed",
-        "Claimed task " + task.task_id + " and preparing context",
+        claimed_message,
         0,
         NowIso(),
         session_key
@@ -386,10 +399,13 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
     WriteTaskMemory(workspace, task.task_id, project_name, "claimed", 
                     "Preparing execution context: " + context_summary);
 
-    // Step 2: Report running status with context
+    // Step 2: Report running status with project context
     std::string running_summary = "Executing task " + task.task_id;
     if (!project_name.empty()) {
         running_summary += " in project " + project_name;
+        if (!project_git_url.empty()) {
+            running_summary += " (git: " + project_git_url + ")";
+        }
     }
     running_summary += ": " + task.title;
     
@@ -427,6 +443,8 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
         if (!std::filesystem::exists(project_dir / ".git")) {
             // 2.3 Handle clone failure
             LOG_ERROR("[task_runtime] Failed to clone repository: {}", clone_output);
+            WriteTaskMemory(workspace, task.task_id, project_name, "failed",
+                           "[git] Clone failed: " + clone_output);
             CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, {
                 "failed",
                 "Failed to clone repository: " + clone_output,
@@ -438,6 +456,10 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             finished.store(true);
             return;
         }
+
+        // Log successful clone
+        WriteTaskMemory(workspace, task.task_id, project_name, "running",
+                       "[git] Cloned " + project_git_url + " to " + project_dir.string());
         
         // 2.4 Verify .gitignore
         const auto gitignore_path = project_dir / ".gitignore";
@@ -478,10 +500,16 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
         const auto branch_name = "kabot-task-" + task.task_id;
         const auto branch_cmd = "cd \"" + project_dir.string() + "\" && git checkout -b " + branch_name + " 2>&1";
         const auto branch_output = ExecuteCommand(branch_cmd);
-        
+
+        // Log branch creation
+        WriteTaskMemory(workspace, task.task_id, project_name, "running",
+                       "[git] Created branch " + branch_name);
+
         // 2.7 Handle existing branch
         if (branch_output.find("already exists") != std::string::npos) {
             ExecuteCommand("cd \"" + project_dir.string() + "\" && git checkout " + branch_name + " && git reset --hard HEAD");
+            WriteTaskMemory(workspace, task.task_id, project_name, "running",
+                           "[git] Reset existing branch " + branch_name);
         }
     }
 
@@ -532,7 +560,8 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
             task.interaction.channel,
             task.interaction.channel_instance,
             task.interaction.chat_id,
-            has_git_workflow ? project_dir.string() : std::string()
+            has_git_workflow ? project_dir.string() : std::string(),
+            task.merge_request
         };
 
         const auto outbound_observer = [&](const kabot::bus::OutboundMessage& outbound) {
@@ -615,9 +644,13 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
                 // 3.2 Commit changes
                 const auto commit_msg = "kabot: " + task.title + " [task-" + task.task_id + "]";
                 ExecuteCommand("cd \"" + project_path + "\" && git add -A && git commit -m \"" + commit_msg + "\"");
+                WriteTaskMemory(workspace, task.task_id, project_name, "running",
+                               "[git] Committed changes with message: " + commit_msg);
                 
                 // 3.3 Push branch
                 ExecuteCommand("cd \"" + project_path + "\" && git push origin " + branch_name);
+                WriteTaskMemory(workspace, task.task_id, project_name, "running",
+                               "[git] Pushed branch " + branch_name);
                 
                 // 3.4 Create MR using platform CLI
                 const auto mr_cmd = "cd \"" + project_path + "\" && (glab mr create --source-branch " + branch_name + 
@@ -631,12 +664,18 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
                     const auto url_end = mr_output.find_first_of(" \t\n\r", url_pos);
                     mr_url = mr_output.substr(url_pos, url_end != std::string::npos ? url_end - url_pos : std::string::npos);
                     mr_created_at = NowIso();
+                    WriteTaskMemory(workspace, task.task_id, project_name, "running",
+                                   "[git] Created MR: " + mr_url);
                 } else {
                     // 3.5 MR creation failed - log warning but continue
                     LOG_WARN("[task_runtime] MR creation failed for task {}: {}", task.task_id, mr_output);
+                    WriteTaskMemory(workspace, task.task_id, project_name, "running",
+                                   "[git] MR creation failed: " + mr_output);
                 }
+            } else {
+                WriteTaskMemory(workspace, task.task_id, project_name, "running",
+                               "[git] No changes to commit");
             }
-            // 3.6 No changes - skip commit/push/MR
         }
 
         // Step 3: Verify task completion
@@ -658,9 +697,16 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
         ClearActiveTask(local_agent);
 
         if (verification_passed) {
+            std::string completed_message = "Task " + task.task_id + " finished successfully";
+            if (!project_name.empty()) {
+                completed_message += " for project " + project_name;
+            }
+            if (!mr_url.empty()) {
+                completed_message += ". MR: " + mr_url;
+            }
             kabot::relay::RelayTaskStatusUpdate completed_update{
                 "completed",
-                "Task " + task.task_id + " finished successfully",
+                completed_message,
                 100,
                 NowIso(),
                 session_key,
@@ -672,6 +718,13 @@ void TaskRuntime::ExecuteClaimedTask(const std::string& local_agent,
                     mr_url,
                     mr_created_at
                 };
+            }
+            LOG_DEBUG("[task_runtime] Sending completed status for task {} with payload: status={}, message={}, has_mr={}",
+                      task.task_id, completed_update.status, completed_update.message,
+                      completed_update.merge_request.has_value());
+            if (completed_update.merge_request.has_value()) {
+                LOG_DEBUG("[task_runtime] MR metadata: url={}, createdAt={}",
+                          completed_update.merge_request->url, completed_update.merge_request->created_at);
             }
             CheckStatusUpdate(relay_.UpdateTaskStatus(local_agent, task.task_id, completed_update),
                               task.task_id, "completed");

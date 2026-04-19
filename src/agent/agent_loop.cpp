@@ -403,13 +403,25 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
     if (!target.working_directory.empty()) {
         kabot::providers::Message context_msg;
         context_msg.role = "user";
-        context_msg.content = "[System context] You are working inside a cloned git repository at: " + target.working_directory + 
+        context_msg.content = "[System context] You are working inside a cloned git repository at: " + target.working_directory +
                              "\nAll file operations and shell commands should be relative to this directory unless explicitly directed otherwise." +
                              "\nCommit your changes when done.";
         context_msg.is_virtual = true;
         // Insert after system message (first element)
         if (!messages.empty()) {
             messages.insert(messages.begin() + 1, std::move(context_msg));
+        }
+    }
+
+    // Inject upstream merge request context if provided
+    if (!target.upstream_merge_request.empty()) {
+        kabot::providers::Message mr_context_msg;
+        mr_context_msg.role = "user";
+        mr_context_msg.content = "[Upstream context] This task depends on a previously created merge request: " + target.upstream_merge_request +
+                                 "\nPlease review the MR and ensure your work is consistent with it.";
+        mr_context_msg.is_virtual = true;
+        if (!messages.empty()) {
+            messages.insert(messages.begin() + 1, std::move(mr_context_msg));
         }
     }
     

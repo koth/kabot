@@ -692,11 +692,11 @@ http::request<http::string_body> BuildTaskStatusRequest(
     if (update.merge_request.has_value()) {
         body["mergeRequest"] = {
             {"url", update.merge_request->url},
-            {"createdAt", update.merge_request->created_at}
+            {"createdAt", update.merge_request->created_at},
+            {"mergedAt", update.merge_request->merged_at.empty() 
+                ? nlohmann::json(nullptr) 
+                : nlohmann::json(update.merge_request->merged_at)}
         };
-        if (!update.merge_request->merged_at.empty()) {
-            body["mergeRequest"]["mergedAt"] = update.merge_request->merged_at;
-        }
     }
 
     http::request<http::string_body> request{http::verb::post, BuildTaskStatusTarget(config, task_id), 11};
