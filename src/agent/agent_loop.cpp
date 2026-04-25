@@ -152,10 +152,21 @@ std::string ToLower(std::string value) {
     return value;
 }
 
+bool ContainsWord(const std::string& haystack, const std::string& keyword) {
+    std::size_t pos = 0;
+    while ((pos = haystack.find(keyword, pos)) != std::string::npos) {
+        if (pos == 0 || !std::isalpha(static_cast<unsigned char>(haystack[pos - 1]))) {
+            return true;
+        }
+        pos++;
+    }
+    return false;
+}
+
 bool ContainsAnyKeyword(const std::string& haystack,
                         const std::initializer_list<const char*> keywords) {
     for (const auto* keyword : keywords) {
-        if (haystack.find(keyword) != std::string::npos) {
+        if (ContainsWord(haystack, keyword)) {
             return true;
         }
     }
@@ -398,7 +409,8 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
     auto session = sessions_.GetOrCreate(session_key);
     auto history = session.GetHistory(static_cast<std::size_t>(config_.max_history_messages));
     auto messages = context_.BuildMessages(history, content, {});
-    
+    session.AddMessage("user", content);
+
     // Inject working directory context if provided
     if (!target.working_directory.empty()) {
         kabot::providers::Message context_msg;
@@ -536,7 +548,6 @@ std::string AgentLoop::ProcessDirect(const std::string& content,
 
     const auto memory_block = ExtractMemoryBlock(final_content);
     final_content = StripMemoryBlock(final_content);
-    session.AddMessage("user", content);
     session.AddMessage("assistant", final_content);
     sessions_.Save(session);
     AppendMemoryEntry(session_key, memory_block);
@@ -606,6 +617,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
         history,
         content,
         msg.media);
+    session.AddMessage("user", content);
     for (const auto& notif : session.TakePendingNotifications()) {
         kabot::providers::Message notif_msg;
         notif_msg.role = "user";
@@ -711,7 +723,6 @@ kabot::bus::OutboundMessage AgentLoop::ProcessMessage(const kabot::bus::InboundM
 
     const auto memory_block = ExtractMemoryBlock(final_content);
     final_content = StripMemoryBlock(final_content);
-    session.AddMessage("user", content);
     session.AddMessage("assistant", final_content);
     sessions_.Save(session);
     AppendMemoryEntry(msg.SessionKey(), memory_block);
@@ -831,6 +842,7 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
     const auto session_key = origin_channel + ":" + origin_chat_id;
     auto session = sessions_.GetOrCreate(session_key);
     auto messages = context_.BuildMessages(session.GetHistory(), msg.content, {});
+    session.AddMessage("user", "[System] " + msg.content);
     for (const auto& notif : session.TakePendingNotifications()) {
         kabot::providers::Message notif_msg;
         notif_msg.role = "user";
@@ -918,7 +930,6 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
 
     const auto memory_block = ExtractMemoryBlock(final_content);
     final_content = StripMemoryBlock(final_content);
-    session.AddMessage("user", "[System] " + msg.content);
     session.AddMessage("assistant", final_content);
     sessions_.Save(session);
     AppendMemoryEntry(session_key, memory_block);
@@ -934,15 +945,15 @@ kabot::bus::OutboundMessage AgentLoop::ProcessSystemMessage(const kabot::bus::In
 
 std::string AgentLoop::ExecuteToolWithGuardrails(kabot::session::Session& session,
                                                      const kabot::providers::ToolCallRequest& call) {
-    if (call.name == "file_edit") {
+    if (call.name == "edit_file") {
         auto path_it = call.arguments.find("path");
         if (path_it == call.arguments.end() || path_it->second.empty()) {
-            return "Error: file_edit requires a path parameter";
+            return "Error: edit_file requires a path parameter";
         }
         if (!session.HasReadFile(path_it->second)) {
-            LOG_WARN("[agent] file_edit blocked: {} was not read before editing session={}",
+            LOG_WARN("[agent] edit_file blocked: {} was not read before editing session={}",
                      path_it->second, session.Key());
-            return "Error: file must be read using read_file before editing with file_edit. Path: " + path_it->second;
+            return "Error: file must be read using read_file before editing with edit_file. Path: " + path_it->second;
         }
     }
 
